@@ -30,6 +30,7 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         self.use_text = use_text
         self.use_memory = use_memory
         self.n_actions = action_space.n
+        self.feature_learn = feature_learn
 
         if input_type == "image":
             self.feature_in = ImageInput(obs_space,use_memory,use_text)
@@ -60,8 +61,10 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         # Define actor's model
         if type(action_space) == Box:
             self.actor = ContinuousActor(self.embedding_size,self.n_actions)
+            self.continuous_action = True
         else:
             self.actor = DiscreteActor(self.embedding_size,self.n_actions)
+            self.continuous_action = False
         
 
         # Initialize parameters correctly
@@ -77,13 +80,14 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         
 
     def forward(self, obs, action=None, next_obs=None, memory=None):
-        x, embedding, memory = self.feature_in(obs, memory)
-        if next_obs is not None:
-             _, next_embedding, _ = self.feature_in(next_obs, memory)
-        else:
-            next_embedding = None
-        predictions = self.feature_out(embedding, next_embedding = next_embedding,action=action, next_obs=next_obs, memory=memory)
+        embedding, memory = self.feature_in(obs, memory)
+        if action is not None:
+             next_embedding, _ = self.feature_in(next_obs, memory)
+             predictions = self.feature_out(embedding, next_embedding = next_embedding,action=action, next_obs=next_obs, memory=memory)
 
+        else:
+            predictions = None
+        
         dist = self.actor(embedding)
         
         successor = self.SR(embedding) + embedding
@@ -162,7 +166,7 @@ class ImageInput(nn.Module):
             nn.Conv2d(16, 32, (2, 2)),
             nn.ReLU(),
             nn.Conv2d(32, 64, (2, 2)),
-            nn.ReLU()
+            nn.Tanh()
         )
         
         self.other = InputModule(obs_space, self.input_embedding_size, use_text, use_memory)
@@ -175,7 +179,7 @@ class ImageInput(nn.Module):
         
         embedding, memory = self.other(obs, x, memory)
             
-        return x, embedding, memory
+        return embedding, memory
     
    
 ## Features from flat input (e.g. one hot, ssps)
@@ -183,11 +187,10 @@ class FlatInput(nn.Module):
     def __init__(self, obs_space, use_text, use_memory, input_embedding_size=64, hidden_size=256):
         super(FlatInput, self).__init__()
         self.input_dim = obs_space["image"][0]
-        self.input_embedding_size = input_embedding_size
+        self.input_embedding_size = self.input_dim# input_embedding_size
         self.layers = nn.Sequential(
-            nn.Linear(self.input_dim, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, self.input_embedding_size)#nn.Tanh()
+            nn.Linear(self.input_dim, self.input_embedding_size),#nn.Tanh()
+            nn.Tanh()
         )
         self.other = InputModule(obs_space, self.input_embedding_size, use_text, use_memory)
         self.embedding_size = self.other.embedding_size
@@ -197,7 +200,7 @@ class FlatInput(nn.Module):
         x = self.layers(x)
         embedding, memory = self.other(obs, x, memory)
             
-        return x, embedding, memory
+        return embedding, memory
     
     
 ### Modules for getting predictions used for feature learning
@@ -253,22 +256,17 @@ class Curiosity(nn.Module):
             nn.LogSigmoid()
             )
         
-    def forward(self, embedding,next_embedding, action, next_obs, memory):
-        if action is not None:
-            
-            if self.n_actions > 1:
-                action = F.one_hot(action.long(), num_classes=self.n_actions).float()
-            else:
-                action = action.float()
-            forward_input = torch.cat((embedding, action), 1)
-            next_obs_pred = self.forward_model(forward_input)
-            
-            inverse_input = torch.cat((embedding, next_embedding), 1)
-            action_pred = self.inverse_model(inverse_input)
+    def forward(self, embedding, next_embedding, action, next_obs, memory):
+        if self.n_actions > 1:
+            action = F.one_hot(action.long(), num_classes=self.n_actions).float()
         else:
-            next_embedding = None
-            next_obs_pred = None
-            action_pred = None
+            action = action.float()
+        forward_input = torch.cat((embedding, action), 1)
+        next_obs_pred = self.forward_model(forward_input)
+        
+        inverse_input = torch.cat((embedding, next_embedding), 1)
+        action_pred = self.inverse_model(inverse_input)
+
         return [next_embedding, next_obs_pred, action_pred]
     
 
@@ -278,7 +276,7 @@ class DiscreteActor(nn.Module):
         super(DiscreteActor, self).__init__()
         self.n_actions = n_actions
         self.embedding_size = embedding_size
-        self.actor = nn.Sequential(
+        self.actor_layers = nn.Sequential(
             nn.Linear(self.embedding_size, 64),
             nn.Tanh(),
             nn.Linear(64, self.n_actions)
@@ -286,7 +284,7 @@ class DiscreteActor(nn.Module):
         
         
     def forward(self, embedding):
-        x = self.actor(embedding)
+        x = self.actor_layers(embedding)
         dist = Categorical(logits=F.log_softmax(x, dim=1))
         return dist
     

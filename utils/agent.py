@@ -2,6 +2,8 @@ import torch
 
 import utils
 from models.model import ACModel
+from models.model_SR import SRModel
+
 
 class Agent:
     """An agent.
@@ -11,16 +13,14 @@ class Agent:
     - to analyze the feedback (i.e. reward and done state) of its action."""
 
     def __init__(self, obs_space, action_space, model_dir, model_name = 'AC',
-                 device=None, argmax=False, num_envs=1, use_memory=False, use_text=False):
+                 device=None, argmax=False, num_envs=1, use_memory=False, 
+                 use_text=False,input_type="image", feature_learn="curiosity"):
         obs_space, self.preprocess_obss = utils.get_obss_preprocessor(obs_space)
-        if model_name == 'AC':
+        if model_name == 'ac':
             self.acmodel = ACModel(obs_space, action_space, use_memory=use_memory, use_text=use_text)
-        elif model_name == 'SR':
-            from model_SR import SRModel
-            self.acmodel = SRModel(obs_space, action_space, use_memory=use_memory, use_text=use_text)
-        elif model_name == 'SR_curio':
-            from model_SR_curiosity import SRModel
-            self.acmodel = SRModel(obs_space, action_space, use_memory=use_memory, use_text=use_text)
+        elif model_name == 'sr':
+            self.acmodel = SRModel(obs_space, action_space, input_type=input_type,
+                                   use_memory=use_memory, use_text=use_text,feature_learn=feature_learn)
         self.model_name = model_name
         self.device = device
         self.argmax = argmax
@@ -39,21 +39,17 @@ class Agent:
         preprocessed_obss = self.preprocess_obss(obss, device=self.device)
 
         with torch.no_grad():
-            if self.model_name == 'AC':
+            if self.model_name == 'ac':
                 if self.acmodel.recurrent:
-                    dist, _, self.memories = self.acmodel(preprocessed_obss, self.memories)
+                    dist, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
                 else:
                     dist, _ = self.acmodel(preprocessed_obss)
-            elif self.model_name == 'SR':
+            elif self.model_name == 'sr':
                 if self.acmodel.recurrent:
-                    dist, _, _, _, _, _, self.memories = self.acmodel(preprocessed_obss, self.memories)
+                    dist, _, _, _, _, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
                 else:
                     dist, _, _, _, _, _ = self.acmodel(preprocessed_obss)
-            elif self.model_name == 'SR_curio':
-                if self.acmodel.recurrent:
-                    dist, _, _,_,_, _, _, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
-                else:
-                    dist, _, _,_,_, _, _, _ = self.acmodel(preprocessed_obss)
+
 
         if self.argmax:
             actions = dist.probs.max(1, keepdim=True)[1]

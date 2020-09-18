@@ -1,11 +1,11 @@
 import gym
-# delenvs = []
-# for env in gym.envs.registry.env_specs:
-#      if 'MiniGrid' in env:
-#           #print("Remove {} from registry".format(env))
-#           delenvs.append(env)
-# for env in delenvs:
-#     del gym.envs.registry.env_specs[env]
+delenvs = []
+for env in gym.envs.registry.env_specs:
+      if 'MiniGrid' in env:
+          #print("Remove {} from registry".format(env))
+          delenvs.append(env)
+for env in delenvs:
+    del gym.envs.registry.env_specs[env]
 import gym_minigrid
 
 

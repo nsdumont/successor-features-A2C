@@ -2,7 +2,12 @@ import argparse
 import time
 import datetime
 import torch
-from gym_minigrid.wrappers import *
+import utils
+from gym_minigrid.wrappers import SSPWrapper
+import copy
+
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input flat --feature-learn curiosity', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --lr 0.001 --target-update 100 --recon-loss-coef 5', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
 
 # delenvs = []
 # for env in gym.envs.registry.env_specs:
@@ -15,14 +20,12 @@ from gym_minigrid.wrappers import *
 import tensorboardX
 import sys
 
-import utils
 from models.model import ACModel
 
 from algos.sr_a2c import SRAlgo
 from algos.a2c import A2CAlgo
 from algos.ppo import PPOAlgo
 from models.model_SR import SRModel
-
 
 #runfile('/home/ns2dumon/Documents/GitHub/CS885_project/train.py', args='--algo sr --env MountainCarContinuous-v0 --frames 100000 --continous-action True', wdir='/home/ns2dumon/Documents/GitHub/CS885_project', post_mortem=True)
 
@@ -47,6 +50,12 @@ parser.add_argument("--procs", type=int, default=1,
                     help="number of processes (default: 5)")
 parser.add_argument("--frames", type=int, default=10**7,
                     help="number of frames of training (default: 1e7)")
+parser.add_argument("--load-optimizer-state", type=bool, default=True,
+                    help="If True and a logs for this model (defined by model arg) exist then load the optimizer info from last run. Otherwise do not.")
+
+parser.add_argument("--target-update", type=int, default=100,
+                    help="how often to update the target network") # right now only set up for sr algo
+
 
 ## Parameters for main algorithm
 parser.add_argument("--epochs", type=int, default=4,
@@ -63,36 +72,34 @@ parser.add_argument("--gae-lambda", type=float, default=0.95,
                     help="lambda coefficient in GAE formula (default: 0.95, 1 means no gae)")
 parser.add_argument("--entropy-coef", type=float, default=0.005,
                     help="entropy term coefficient (default: 0.01)")
+parser.add_argument("--memory-cap", type=int, default=10000,
+                    help=" (default: 300)")
 
 parser.add_argument("--sr-loss-coef", type=float, default=1,
-                    help="sr term coefficient (default: 0.5)")
+                    help="sr loss term coefficient (default: 0.5)")
 parser.add_argument("--policy-loss-coef", type=float, default=1,
-                    help="policy term coefficient (default: 1)")
-parser.add_argument("--recon-loss-coef", type=float, default=1,
-                    help="recontruction term coefficient (default: 1)")
+                    help="policy loss term coefficient (default: 1)")
+parser.add_argument("--recon-loss-coef", type=float, default=2,
+                    help="recontruction term coefficient (default: 2)")
 parser.add_argument("--reward-loss-coef", type=float, default=1,
-                    help="reward term coefficient (default: 1)")
+                    help="reward loss term coefficient (default: 1)")
 parser.add_argument("--norm-loss-coef", type=float, default=1,
-                    help=" ")
-parser.add_argument("--rank-loss-coef", type=float, default=0,
-                    help=" ")
-parser.add_argument("--kl-loss-coef", type=float, default=0.1,
-                    help=" ")
+                    help="norm loss term coefficient (default: 1)")
+#parser.add_argument("--rank-loss-coef", type=float, default=0,
+#                    help="rank loss term coefficient (default: 1)")
+#parser.add_argument("--kl-loss-coef", type=float, default=0.1,
+#                    help="kl loss term coefficient (default: 1)")
 
 parser.add_argument("--input", type=str, default="image",
-                    help="features")
+                    help="format of input:  image | flat  (default: image)")
 parser.add_argument("--feature-learn", type=str, default="curiosity",
-                    help="feature learning")
-parser.add_argument("--continous-action", type=bool, default=False,
-                    help=" ")
-parser.add_argument("--vae", type=bool, default=False,
-                    help=" ")
+                    help="method for feature learning:  curiosity | reconstruction  (default: curiosity)")
 
 
 parser.add_argument("--value-loss-coef", type=float, default=0.5,
                     help="value loss term coefficient (default: 0.5)")
-parser.add_argument("--max-grad-norm", type=float, default=0.5,
-                    help="maximum norm of gradient (default: 0.5)")
+parser.add_argument("--max-grad-norm", type=float, default=10,
+                    help="maximum norm of gradient (default: 10)")
 parser.add_argument("--optim-eps", type=float, default=1e-8,
                     help="Adam and RMSprop optimizer epsilon (default: 1e-8)")
 parser.add_argument("--optim-alpha", type=float, default=0.99,
@@ -104,8 +111,6 @@ parser.add_argument("--recurrence", type=int, default=1,
 parser.add_argument("--text", action="store_true", default=False,
                     help="add a GRU to the model to handle text input")
 
-parser.add_argument("--load-optimizer-state", type=bool, default=True,
-                    help=" ")
 
 args = parser.parse_args()
 
@@ -147,10 +152,10 @@ if args.input =='image':
         envs.append(utils.make_env(args.env, args.seed + 10000 * i))
 elif args.input =='flat':
     import nengo_ssp as ssp
-    X,Y,_ = ssp.vector_generation.HexagonalVectors(10,10)
+    X,Y,_ = ssp.HexagonalBasis(10,10)
     d = len(X.v)
     for i in range(args.procs):
-        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i),d,X,Y))
+        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i),d,X,Y,delta=2))
 txt_logger.info("Environments loaded\n")
 
 # Load training status
@@ -173,8 +178,11 @@ if args.algo == "sr":
     model = SRModel(obs_space, envs[0].action_space, args.mem, args.text, args.input, args.feature_learn)
 else:
     model = ACModel(obs_space, envs[0].action_space, args.mem, args.text)
+target = copy.deepcopy(model)
 if "model_state" in status:
     model.load_state_dict(status["model_state"])
+if "target_state" in status:
+    target.load_state_dict(status["target_state"])
 model.to(device)
 txt_logger.info("Model loaded\n")
 txt_logger.info("{}\n".format(model))
@@ -190,11 +198,10 @@ elif args.algo == "ppo":
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
-    algo = SRAlgo(envs, model, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
-                            args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,
+    algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+                            args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
-                            args.optim_alpha, args.optim_eps, preprocess_obss,continous_action = args.continous_action,
-                            norm_loss_coef=args.norm_loss_coef, rank_loss_coef=args.rank_loss_coef)
+                            args.optim_alpha, args.optim_eps, args.memory_cap, preprocess_obss)
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
@@ -207,6 +214,7 @@ txt_logger.info("Optimizer loaded\n")
 num_frames = status["num_frames"]
 update = status["update"]
 start_time = time.time()
+first_line=True
 
 while num_frames < args.frames:
     # Update model parameters
@@ -219,6 +227,11 @@ while num_frames < args.frames:
 
     num_frames += logs["num_frames"]
     update += 1
+    
+    # Update target
+    
+    if update % args.target_update == 0:
+        target.load_state_dict(model.state_dict())
 
     # Print logs
     
@@ -237,9 +250,9 @@ while num_frames < args.frames:
         header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
         data += num_frames_per_episode.values()
         if args.algo == "sr":
-            header += ["entropy", "value_loss", "policy_loss","policy_loss_V", "sr_loss", "reconstruction_loss","reward_loss","norm_loss", "grad_norm"]
+            header += ["entropy", "value_loss", "policy_loss", "sr_loss", "reconstruction_loss","reward_loss","norm_loss", "grad_norm", "A_mse"]
             data += [logs["entropy"], logs["value_loss"], logs["policy_loss"], logs["sr_loss"],
-                     logs["reconstruction_loss"], logs["reward_loss"], logs["norm_loss"],logs["grad_norm"]]
+                     logs["reconstruction_loss"], logs["reward_loss"], logs["norm_loss"],logs["grad_norm"],logs["A_mse"]]
     
            # txt_logger.info(
             #    "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | srL {:.3f} | reconL {:.3f} | rL {:.3f} | ∇ {:.3f}"
@@ -256,13 +269,15 @@ while num_frames < args.frames:
         header += ["return_" + key for key in return_per_episode.keys()]
         data += return_per_episode.values()
 
-        if status["num_frames"] == 0:
+        if first_line:
             csv_logger.writerow(header)
+        first_line = False
         csv_logger.writerow(data)
         csv_file.flush()
 
         for field, value in zip(header, data):
             tb_writer.add_scalar(field, value, num_frames)
+
 
     # Save status
 
