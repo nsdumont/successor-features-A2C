@@ -14,7 +14,7 @@ class SRAlgo(BaseSRAlgo):
                  entropy_coef=0.01, sr_loss_coef=1, policy_loss_coef=1,recon_loss_coef=1,reward_loss_coef=1,norm_loss_coef=1,
                  max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200, preprocess_obss=None, reshape_reward=None):
  
-        num_frames_per_proc = num_frames_per_proc or 100
+        num_frames_per_proc = num_frames_per_proc or 200
 
         super().__init__(envs, model, target, device, num_frames_per_proc, discount, lr, gae_lambda, 
                          max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
@@ -27,7 +27,7 @@ class SRAlgo(BaseSRAlgo):
         self.reward_loss_coef = reward_loss_coef
         self.feature_learn = feature_learn
         
-        self.batch_size=500
+        self.batch_size=300
         
         #params = [self.model.feature_in.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
         #self.feature_params = itertools.chain(*params)
@@ -37,10 +37,10 @@ class SRAlgo(BaseSRAlgo):
                                                       {'params': self.model.actor.parameters()}],
                                                      lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
         self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
-                                          lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.01)
+                                          lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
         
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
-                                          lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.001)
+                                          lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
           
         self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
                                           lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
@@ -117,7 +117,7 @@ class SRAlgo(BaseSRAlgo):
 
             
             A_diff = F.mse_loss(SR_advanage_dot_R, sb.V_advantage)
-            if self.num_updates < 10000000:
+            if self.num_updates < -1:
                 policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
             else:
                 policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
