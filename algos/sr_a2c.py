@@ -12,7 +12,7 @@ class SRAlgo(BaseSRAlgo):
 
     def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99, lr=0.01, gae_lambda=0.95,
                  entropy_coef=0.01, sr_loss_coef=1, policy_loss_coef=1,recon_loss_coef=1,reward_loss_coef=1,norm_loss_coef=1,
-                 max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200, preprocess_obss=None, reshape_reward=None):
+                 max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200,batch_size=300, preprocess_obss=None, reshape_reward=None):
  
         num_frames_per_proc = num_frames_per_proc or 200
 
@@ -78,16 +78,16 @@ class SRAlgo(BaseSRAlgo):
             sb = exps[inds + i]
 
             # Run model
-            if self.model.feature_learn=="curiosity":
-                if self.model.recurrent:
-                    _, _, _, predictions, _, _, _ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
-                else:
-                    _, _, _, predictions, _, _ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
+            #if self.model.feature_learn=="curiosity":
+            if self.model.recurrent:
+                _, _, _, predictions, _, _, _ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
             else:
-                if self.model.recurrent:
-                    _, _, _, predictions, _, _, _ = self.model(sb.obs, sb.action, sb.obs, memory * sb.mask)
-                else:
-                    _, _, _, predictions, _, _ = self.model(sb.obs,sb.action,sb.obs)
+                _, _, _, predictions, _, _ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
+            # else:
+            #     if self.model.recurrent:
+            #         _, _, _, predictions, _, _, _ = self.model(sb.obs, sb.action, sb.obs, memory * sb.mask)
+            #     else:
+            #         _, _, _, predictions, _, _ = self.model(sb.obs,sb.action,sb.obs)
             if self.model.recurrent:
                 dist, value, embedding, _, successor, reward, memory = self.model(sb.obs,memory= memory * sb.mask)
             else:
@@ -117,10 +117,10 @@ class SRAlgo(BaseSRAlgo):
 
             
             A_diff = F.mse_loss(SR_advanage_dot_R, sb.V_advantage)
-            if self.num_updates < -1:
-                policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
-            else:
-                policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
+            #if self.num_updates < -1:
+            #    policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
+            #else:
+            policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
             actor_loss = policy_loss - self.entropy_coef * entropy 
         
             # Update batch values
@@ -167,7 +167,7 @@ class SRAlgo(BaseSRAlgo):
             _, _, _, _, _, reward, _ = self.model(batch_state) # issuse with memory here
         else:
             _, _, _, _, _, reward = self.model(batch_state)
-        update_reward_loss = F.mse_loss(reward, batch_reward.squeeze())
+        update_reward_loss = F.smooth_l1_loss(reward, batch_reward.squeeze())
     
         self.model.zero_grad()
         update_reward_loss.backward(retain_graph=True)

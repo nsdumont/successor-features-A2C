@@ -3,11 +3,9 @@ import time
 import datetime
 import torch
 import utils
-from gym_minigrid.wrappers import SSPWrapper
 import copy
 
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input flat --feature-learn curiosity', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --lr 0.001 --target-update 100 --recon-loss-coef 5', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --lr 0.001 --target-update 100 --recon-loss-coef 5 --entropy-coef 0.005', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
 
 # delenvs = []
 # for env in gym.envs.registry.env_specs:
@@ -27,7 +25,6 @@ from algos.a2c import A2CAlgo
 from algos.ppo import PPOAlgo
 from models.model_SR import SRModel
 
-#runfile('/home/ns2dumon/Documents/GitHub/CS885_project/train.py', args='--algo sr --env MountainCarContinuous-v0 --frames 100000 --continous-action True', wdir='/home/ns2dumon/Documents/GitHub/CS885_project', post_mortem=True)
 
 # Parse arguments
 
@@ -61,7 +58,7 @@ parser.add_argument("--target-update", type=int, default=100,
 parser.add_argument("--epochs", type=int, default=4,
                     help="number of epochs for PPO (default: 4)")
 parser.add_argument("--batch-size", type=int, default=256,
-                    help="batch size for PPO (default: 256)")
+                    help="batch size for PPO & reward function learning in SR (default: 300)")
 parser.add_argument("--frames-per-proc", type=int, default=None,
                     help="number of frames per process before update (default: 5 for A2C and 128 for PPO)")
 parser.add_argument("--discount", type=float, default=0.99,
@@ -73,7 +70,9 @@ parser.add_argument("--gae-lambda", type=float, default=0.95,
 parser.add_argument("--entropy-coef", type=float, default=0.005,
                     help="entropy term coefficient (default: 0.01)")
 parser.add_argument("--memory-cap", type=int, default=10000,
-                    help=" (default: 300)")
+                    help=" (default: 10000)")
+
+
 
 parser.add_argument("--sr-loss-coef", type=float, default=1,
                     help="sr loss term coefficient (default: 0.5)")
@@ -152,6 +151,8 @@ if args.input =='image':
         envs.append(utils.make_env(args.env, args.seed + 10000 * i))
 elif args.input =='flat':
     import nengo_ssp as ssp
+    from gym_minigrid.wrappers import SSPWrapper
+
     X,Y,_ = ssp.HexagonalBasis(10,10)
     d = len(X.v)
     for i in range(args.procs):
@@ -201,7 +202,7 @@ elif args.algo == "sr":
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
-                            args.optim_alpha, args.optim_eps, args.memory_cap, preprocess_obss)
+                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss)
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
@@ -294,3 +295,10 @@ while num_frames < args.frames:
             status["vocab"] = preprocess_obss.vocab.vocab
         utils.save_status(status, model_dir)
         txt_logger.info("Status saved")
+
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+data = pd.read_csv(model_dir + "/log.csv")
+sns.lineplot(x="update", y='return_mean', data=data)

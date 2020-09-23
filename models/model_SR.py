@@ -184,10 +184,10 @@ class ImageInput(nn.Module):
    
 ## Features from flat input (e.g. one hot, ssps)
 class FlatInput(nn.Module):
-    def __init__(self, obs_space, use_text, use_memory, input_embedding_size=64, hidden_size=256):
+    def __init__(self, obs_space, use_text, use_memory, input_embedding_size=200, hidden_size=256):
         super(FlatInput, self).__init__()
         self.input_dim = obs_space["image"][0]
-        self.input_embedding_size = self.input_dim# input_embedding_size
+        self.input_embedding_size =  input_embedding_size
         self.layers = nn.Sequential(
             nn.Linear(self.input_dim, self.input_embedding_size),#nn.Tanh()
             nn.Tanh()
@@ -220,7 +220,7 @@ class ImageReconstruction(nn.Module):
         )
         
     def forward(self, embedding, **kwargs):
-        obs_pred = self.decoder(embedding)
+        obs_pred = self.decoder(embedding.reshape(-1,64,1,1))
         obs_pred = obs_pred.transpose(3, 2).transpose(1, 3)
         return obs_pred
     
