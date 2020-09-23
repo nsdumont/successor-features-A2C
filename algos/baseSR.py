@@ -78,6 +78,8 @@ class BaseSRAlgo(ABC):
 
         self.model.to(self.device)
         self.model.train()
+        self.target.to(self.device)
+        self.target.train()
 
         # Store helpers values
 
