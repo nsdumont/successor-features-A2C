@@ -161,10 +161,10 @@ class SRAlgo(BaseSRAlgo):
         transitions = self.replay_memory.sample(np.min([self.batch_size,self.replay_memory.__len__()]))
         batch_state_t, batch_reward = zip(*transitions)
         batch_state = DictList()
-        batch_state.image =  Variable(torch.cat(batch_state_t))
-        batch_reward = Variable(torch.cat(batch_reward))
+        batch_state.image =  torch.cat(batch_state_t)
+        batch_reward = torch.cat(batch_reward)
         if self.model.recurrent:
-            _, _, _, _, _, reward, _ = self.model(batch_state) # issuse with memory here
+            _, _, _, _, _, reward, _ = self.model(batch_state) # issue with memory here
         else:
             _, _, _, _, _, reward = self.model(batch_state)
         update_reward_loss = F.smooth_l1_loss(reward, batch_reward.squeeze())
