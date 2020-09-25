@@ -43,7 +43,7 @@ class SRAlgo(BaseSRAlgo):
                                           lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
           
         self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
-                                          lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
+                                          lr/30,alpha=rmsprop_alpha, eps=rmsprop_eps)
         
         self.num_updates = 0
         
