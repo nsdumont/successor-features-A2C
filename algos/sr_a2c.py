@@ -27,7 +27,7 @@ class SRAlgo(BaseSRAlgo):
         self.reward_loss_coef = reward_loss_coef
         self.feature_learn = feature_learn
         
-        self.batch_size=300
+        self.batch_size=batch_size
         
         #params = [self.model.feature_in.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
         #self.feature_params = itertools.chain(*params)
@@ -43,7 +43,7 @@ class SRAlgo(BaseSRAlgo):
                                           lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
           
         self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
-                                          lr/30,alpha=rmsprop_alpha, eps=rmsprop_eps)
+                                          lr/30,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
         
         self.num_updates = 0
         

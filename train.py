@@ -4,8 +4,12 @@ import datetime
 import torch
 import utils
 import copy
+import numpy as np
 
 #runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --lr 0.001 --target-update 100 --recon-loss-coef 5 --entropy-coef 0.005', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args='--seed 2 --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input flat --feature-learn curiosity --lr 0.0001 --target-update 50 --recon-loss-coef 5 --entropy-coef 0.005 --memory-cap 800 --batch-size 100 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+
 
 # delenvs = []
 # for env in gym.envs.registry.env_specs:
@@ -156,7 +160,7 @@ elif args.input =='flat':
     X,Y,_ = ssp.HexagonalBasis(10,10)
     d = len(X.v)
     for i in range(args.procs):
-        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i),d,X,Y,delta=2))
+        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i),d,X,Y,delta=2, rng=np.random.RandomState(args.seed)))
 txt_logger.info("Environments loaded\n")
 
 # Load training status
@@ -199,10 +203,11 @@ elif args.algo == "ppo":
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
+    reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
-                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss)
+                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward)
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 

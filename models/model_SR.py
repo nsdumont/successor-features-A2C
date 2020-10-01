@@ -187,7 +187,7 @@ class FlatInput(nn.Module):
     def __init__(self, obs_space, use_text, use_memory, input_embedding_size=200, hidden_size=256):
         super(FlatInput, self).__init__()
         self.input_dim = obs_space["image"][0]
-        self.input_embedding_size =  input_embedding_size
+        self.input_embedding_size = self.input_dim# input_embedding_size
         self.layers = nn.Sequential(
             nn.Linear(self.input_dim, self.input_embedding_size),#nn.Tanh()
             nn.Tanh()
