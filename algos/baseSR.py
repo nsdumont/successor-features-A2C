@@ -157,12 +157,12 @@ class BaseSRAlgo(ABC):
             
             with torch.no_grad():
                 if self.model.recurrent:
-                    dist, value, embedding, _, successor, _, memory = self.model(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
-                    _, target_value, target_embedding, _, target_successor, _, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
+                    dist, value, embedding, _, successor, _,_, memory = self.model(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
+                    _, target_value, target_embedding, _, target_successor, _,_, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
                    # target
                 else:
-                    dist, value, embedding, _, successor, _,_ = self.model(preprocessed_obs)
-                    _, target_value, target_embedding, _, target_successor, _,_ = self.target(preprocessed_obs)
+                    dist, value, embedding, _, successor, _,_,_ = self.model(preprocessed_obs)
+                    _, target_value, target_embedding, _, target_successor, _,_,_ = self.target(preprocessed_obs)
                     
                 
 
@@ -179,14 +179,15 @@ class BaseSRAlgo(ABC):
                     action = torch.Tensor(self.env.envs[0].action_space.sample())
                
                 obs, reward, done, _ = self.env.step([action.cpu().numpy()])
-                obs = (obs[0].reshape(1,-1))
+                obs = (obs[0].reshape(1,-1)) ##
             else:
                 action = dist.sample()
                 obs, reward, done, _ = self.env.step(action.cpu().numpy())
 
             # Update experiences values
-            self.replay_memory.push((self.FloatTensor([obs[0]['image']]),
+            self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
                                      self.FloatTensor([reward])))
+
 
             self.obss[i] = self.obs
             self.obs = obs
@@ -243,9 +244,9 @@ class BaseSRAlgo(ABC):
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
             if self.model.recurrent:
-                _, next_value, _, _, next_successor, _, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) #target
+                _, next_value, _, _, next_successor, _, _,_ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) #target
             else:
-                _, next_value, _, _, next_successor, _ = self.target(preprocessed_obs)
+                _, next_value, _, _, next_successor, _,_ = self.target(preprocessed_obs)
 
 
         for i in reversed(range(self.num_frames_per_proc)):

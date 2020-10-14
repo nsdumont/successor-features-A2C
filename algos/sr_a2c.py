@@ -33,11 +33,10 @@ class SRAlgo(BaseSRAlgo):
         #self.feature_params = itertools.chain(*params)
         
         #self.feature_optimizer = torch.optim.RMSprop(self.feature_params, lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
-        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.feature_out.parameters()},
-                                                      {'params': self.model.actor.parameters()}],
+        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.feature_out.parameters()}, {'params': self.model.actor.parameters()}],
                                                      lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
-        self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
-                                          lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
+        #self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+         #                                 lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
         
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
                                           lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
@@ -80,18 +79,18 @@ class SRAlgo(BaseSRAlgo):
             # Run model
             #if self.model.feature_learn=="curiosity":
             if self.model.recurrent:
-                _, _, _, predictions, _, _, _ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
+                _, _, _, predictions, _, _, _,_ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
             else:
-                _, _, _, predictions, _, _ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
+                _, _, _, predictions, _, _,_ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
             # else:
             #     if self.model.recurrent:
             #         _, _, _, predictions, _, _, _ = self.model(sb.obs, sb.action, sb.obs, memory * sb.mask)
             #     else:
             #         _, _, _, predictions, _, _ = self.model(sb.obs,sb.action,sb.obs)
             if self.model.recurrent:
-                dist, value, embedding, _, successor, reward, memory = self.model(sb.obs,memory= memory * sb.mask)
+                dist, value, embedding, _, successor, _,_, memory = self.model(sb.obs,memory= memory * sb.mask)
             else:
-                dist, value, embedding, _, successor, reward = self.model(sb.obs)
+                dist, value, embedding, _, successor, _,_ = self.model(sb.obs)
                     
             # Compute loss
             
@@ -112,7 +111,9 @@ class SRAlgo(BaseSRAlgo):
             entropy = dist.entropy().mean()
             
             with torch.no_grad():
-                SR_advanage_dot_R = self.target.reward(sb.SR_advantage).reshape(-1) #modle or target 
+                #SR_advanage_dot_R2 = self.target.reward2(sb.SR_advantage).reshape(-1) #modle or target 
+                _,_,_,_,_,_,r_vec,_ = self.target(sb.obs,memory= memory * sb.mask)
+                SR_advanage_dot_R = torch.sum(r_vec * sb.SR_advantage, 1)
                 value_loss = (value - sb.returnn).pow(2).mean() # not used for optimization, just for logs
 
             
@@ -159,15 +160,18 @@ class SRAlgo(BaseSRAlgo):
         
         # reward leanring: not on policy so do random samples
         transitions = self.replay_memory.sample(np.min([self.batch_size,self.replay_memory.__len__()]))
-        batch_state_t, batch_reward = zip(*transitions)
+        batch_state_img, batch_state_txt, batch_reward = zip(*transitions)
         batch_state = DictList()
-        batch_state.image =  torch.cat(batch_state_t)
+        batch_state.image =  torch.cat(batch_state_img)
+        batch_state.text = torch.cat(batch_state_txt)
         batch_reward = torch.cat(batch_reward)
         if self.model.recurrent:
-            _, _, _, _, _, reward, _ = self.model(batch_state) # issue with memory here
+            _, _, _, _, _, reward, _,_ = self.model(batch_state) # issue with memory here
         else:
-            _, _, _, _, _, reward = self.model(batch_state)
-        update_reward_loss = F.smooth_l1_loss(reward, batch_reward.squeeze())
+            _, _, _, _, _, reward,_ = self.model(batch_state)
+        update_reward_loss = F.smooth_l1_loss(reward, batch_reward.squeeze()) 
+
+
     
         self.model.zero_grad()
         update_reward_loss.backward(retain_graph=True)
@@ -191,7 +195,7 @@ class SRAlgo(BaseSRAlgo):
         
         update_grad_norm = np.max([ update_grad_norm_reward.item(),update_grad_norm_sr.item()]) #update_grad_norm_sr.item()
 
-
+        #update_grad_norm=0
         # Log some values
 
         logs = {

@@ -16,8 +16,19 @@ def init_params(m):
         m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
         if m.bias is not None:
             m.bias.data.fill_(0)
+            #m.bias.data.normal_(0,1)
 
 
+def init_params2(m):
+    classname = m.__class__.__name__
+    if classname.find("Linear") != -1:
+        #m.weight.data.fill_(0)
+        #m.weight.data.normal_(0, 1)
+        #m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
+        if m.bias is not None:
+           # m.bias.data.fill_(0)
+            m.bias.data.normal_(0,1)
+            m.bias.data *= 1 / torch.sqrt(m.bias.data.pow(2).sum())
 
     
 
@@ -33,11 +44,14 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         self.feature_learn = feature_learn
 
         if input_type == "image":
-            self.feature_in = ImageInput(obs_space,use_memory,use_text)
+            self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text)
         elif input_type=="flat":
-            self.feature_in = FlatInput(obs_space,use_memory,use_text)
+            self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text)
+        elif input_type=="ssp":
+            self.feature_in = InputModule(obs_space,obs_space["image"][0],use_memory=use_memory,use_text=use_text)
             
         self.image_embedding_size = self.feature_in.input_embedding_size
+        self.goal_embedding_size = self.feature_in.other.text_embedding_size
         self.embedding_size = self.feature_in.embedding_size
             
         if feature_learn=="reconstruction" and input_type=="image":
@@ -49,7 +63,13 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         
         
         # Define reward model
-        self.reward = nn.Linear(self.embedding_size, 1, bias=False)
+        #self.reward2 = nn.Linear(self.embedding_size, 1, bias=False)
+        #self.reward = nn.ModuleList([nn.Linear(self.goal_embedding_size, self.embedding_size)])
+        #self.reward = nn.ModuleList([nn.Linear(self.image_embedding_size, self.embedding_size, bias=True)])
+        #self.reward = nn.Module()
+        #self.w = torch.nn.Parameter(torch.randn(1,self.embedding_size))
+        #self.w.requires_grad = True
+        #self.reward.register_parameter(name='w', param=nn.Parameter(torch.randn(1,self.embedding_size), requires_grad = True))
 
         # Define SR model
         self.SR = nn.Sequential(
@@ -69,20 +89,14 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
 
         # Initialize parameters correctly
         self.apply(init_params)
-
-    @property
-    def memory_size(self):
-        return 2*self.semi_memory_size
-
-    @property
-    def semi_memory_size(self):
-        return self.image_embedding_size
-        
+        self.reward = nn.Linear(self.goal_embedding_size, self.embedding_size)
+        self.reward.apply(init_params2)
+ 
 
     def forward(self, obs, action=None, next_obs=None, memory=None):
-        embedding, memory = self.feature_in(obs, memory)
+        embedding, memory, embed_goal = self.feature_in(obs, memory=memory)
         if action is not None:
-             next_embedding, _ = self.feature_in(next_obs, memory)
+             next_embedding, _, _ = self.feature_in(next_obs, memory=memory)
              predictions = self.feature_out(embedding, next_embedding = next_embedding,action=action, next_obs=next_obs, memory=memory)
 
         else:
@@ -92,19 +106,28 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         
         successor = self.SR(embedding) + embedding
         
-        r = self.reward(embedding)
-        reward = r.squeeze(1)
+        #w=0
+        #w = self.reward.w #
+        #w = self.reward[0](embed_goal)
+        r_vec = self.reward(embed_goal)
+        reward =  torch.sum(r_vec * embedding,1)
+        #reward2 = self.reward2(embedding).squeeze(1)
         
         with torch.no_grad():
-            value = self.reward(successor) 
-            value = value.squeeze(1)
+            #value = self.reward(successor) 
+            #value = value.squeeze(1)
+            value = (r_vec * successor).sum(-1)
 
-        return dist, value, embedding, predictions, successor, reward, memory
+        return dist, value, embedding, predictions, successor, reward, r_vec, memory
 
-    def _get_embed_text(self, text):
-        _, hidden = self.text_rnn(self.word_embedding(text))
-        return hidden[-1]
 
+    @property
+    def memory_size(self):
+        return 2*self.semi_memory_size
+
+    @property
+    def semi_memory_size(self):
+        return self.image_embedding_size 
 
 
 
@@ -112,7 +135,7 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
 
 ## Add-ons that use memory (LSTMs) and text input
 class InputModule(nn.Module):
-    def __init__(self,obs_space, input_embedding_size, use_text, use_memory):
+    def __init__(self,obs_space, input_embedding_size, use_memory, use_text):
         super(InputModule, self).__init__()
         self.use_text = use_text
         self.use_memory = use_memory
@@ -124,17 +147,35 @@ class InputModule(nn.Module):
 
         # Define text embedding
         if self.use_text:
-            self.word_embedding_size = 32
-            self.word_embedding = nn.Embedding(obs_space["text"], self.word_embedding_size)
-            self.text_embedding_size = 128
-            self.text_rnn = nn.GRU(self.word_embedding_size, self.text_embedding_size, batch_first=True)
+            self.text_embedding_size = input_embedding_size
+
+           # self.word_embedding_size = 2#32
+            #self.word_embedding = nn.Embedding(obs_space["text"], self.word_embedding_size)
+            
+            self.text_layer = nn.Linear(obs_space["text"][0], self.text_embedding_size)
+            #self.text_layer = nn.GRU(self.word_embedding_size, self.text_embedding_size, batch_first=True)
+        else:
+            self.text_embedding_size = 1
 
         # Resize image embedding
         self.embedding_size = self.input_embedding_size
         if self.use_text:
             self.embedding_size += self.text_embedding_size
+    
+    def _get_embed_text(self, text):
+        #_, hidden = self.text_layer(self.word_embedding(text))
+        #return hidden[-1]
+        return F.relu(self.text_layer(text))
         
-    def forward(self, obs, x, memory):
+    
+
+    @property
+    def semi_memory_size(self):
+        return self.input_embedding_size
+        
+    def forward(self, obs, x=None, memory=None):
+        if x is None:
+            x = obs.image
         
         if self.use_memory:
             hidden = (memory[:, :self.semi_memory_size].clone(), memory[:, self.semi_memory_size:].clone())
@@ -147,12 +188,14 @@ class InputModule(nn.Module):
         if self.use_text:
             embed_text = self._get_embed_text(obs.text)
             embedding = torch.cat((embedding, embed_text), dim=1)
+        else:
+            embed_text = torch.zeros((obs.text.shape[0],self.text_embedding_size))
             
-        return embedding, memory
+        return embedding, memory, embed_text
     
 ## Features from image data 
 class ImageInput(nn.Module):
-    def __init__(self, obs_space, use_text, use_memory):
+    def __init__(self, obs_space, use_memory, use_text):
         super(ImageInput, self).__init__()
         self.use_text = use_text
         self.use_memory = use_memory
@@ -169,7 +212,7 @@ class ImageInput(nn.Module):
             nn.Tanh()
         )
         
-        self.other = InputModule(obs_space, self.input_embedding_size, use_text, use_memory)
+        self.other = InputModule(obs_space, self.input_embedding_size, use_memory=use_memory, use_text=use_text )
         self.embedding_size = self.other.embedding_size
         
     def forward(self, obs, memory):
@@ -177,14 +220,14 @@ class ImageInput(nn.Module):
         embedding = self.image_conv(x)
         x = embedding.reshape(embedding.shape[0], -1)
         
-        embedding, memory = self.other(obs, x, memory)
+        embedding, memory, embed_goal = self.other(obs, x, memory)
             
-        return embedding, memory
+        return embedding, memory, embed_goal
     
    
 ## Features from flat input (e.g. one hot, ssps)
 class FlatInput(nn.Module):
-    def __init__(self, obs_space, use_text, use_memory, input_embedding_size=200, hidden_size=256):
+    def __init__(self, obs_space,use_memory,  use_text, input_embedding_size=200, hidden_size=256):
         super(FlatInput, self).__init__()
         self.input_dim = obs_space["image"][0]
         self.input_embedding_size = self.input_dim# input_embedding_size
@@ -198,10 +241,11 @@ class FlatInput(nn.Module):
     def forward(self, obs, memory):
         x = obs.image
         x = self.layers(x)
-        embedding, memory = self.other(obs, x, memory)
+        embedding, memory, embed_goal = self.other(obs, x, memory)
             
-        return embedding, memory
+        return embedding, memory, embed_goal
     
+
     
 ### Modules for getting predictions used for feature learning
 

@@ -1,10 +1,11 @@
 import os
 import json
-import numpy
+import numpy as np
 import re
 import torch
 import torch_ac
 import gym
+
 
 import utils
 
@@ -20,16 +21,26 @@ def get_obss_preprocessor(obs_space):
             })
 
     # Check if it is a MiniGrid observation space
-    elif isinstance(obs_space, gym.spaces.Dict) and list(obs_space.spaces.keys()) == ["image"]:
-        obs_space = {"image": obs_space.spaces["image"].shape, "text": 100}
+    elif isinstance(obs_space, gym.spaces.Dict) and ("image" in list(obs_space.spaces.keys())):
+        if ("mission" in list(obs_space.spaces.keys()) and (obs_space.spaces["mission"].shape is not None)):
+            obs_space = {"image": obs_space.spaces["image"].shape, "text": obs_space.spaces["mission"].shape}
+        
+            def preprocess_obss(obss, device=None):
+                return torch_ac.DictList({
+                    "image": preprocess_images([obs["image"] for obs in obss], device=device),
+                    "text": preprocess_images([obs["mission"] for obs in obss], device=device)
+                })
+        else:
+            obs_space = {"image": obs_space.spaces["image"].shape, "text": 100}
 
-        vocab = Vocabulary(obs_space["text"])
-        def preprocess_obss(obss, device=None):
-            return torch_ac.DictList({
-                "image": preprocess_images([obs["image"] for obs in obss], device=device),
-                "text": preprocess_texts([obs["mission"] for obs in obss], vocab, device=device)
-            })
-        preprocess_obss.vocab = vocab
+            vocab = Vocabulary(obs_space["text"])
+            vocab.load_vocab( dict(zip( [str(i) for i in range(10)], list(np.arange(10)))) )
+            def preprocess_obss(obss, device=None):
+                return torch_ac.DictList({
+                    "image": preprocess_images([obs["image"] for obs in obss], device=device),
+                    "text": preprocess_texts([obs["mission"] for obs in obss], vocab, device=device)
+                })
+            preprocess_obss.vocab = vocab
 
     else:
         raise ValueError("Unknown observation space: " + str(obs_space))
@@ -39,8 +50,9 @@ def get_obss_preprocessor(obs_space):
 
 def preprocess_images(images, device=None):
     # Bug of Pytorch: very slow if not first converted to numpy array
-    images = numpy.array(images)
+    images = np.array(images)
     return torch.tensor(images, device=device, dtype=torch.float)
+
 
 
 def preprocess_texts(texts, vocab, device=None):
@@ -48,17 +60,17 @@ def preprocess_texts(texts, vocab, device=None):
     max_text_len = 0
 
     for text in texts:
-        tokens = re.findall("([a-z]+)", text.lower())
-        var_indexed_text = numpy.array([vocab[token] for token in tokens])
+        tokens = re.findall("([a-z1-9]+)", text.lower())
+        var_indexed_text = np.array([vocab[token] for token in tokens])
         var_indexed_texts.append(var_indexed_text)
         max_text_len = max(len(var_indexed_text), max_text_len)
 
-    indexed_texts = numpy.zeros((len(texts), max_text_len))
+    indexed_texts = np.zeros((len(texts), max_text_len))
 
     for i, indexed_text in enumerate(var_indexed_texts):
         indexed_texts[i, :len(indexed_text)] = indexed_text
 
-    return torch.tensor(indexed_texts, device=device, dtype=torch.long)
+    return torch.tensor(indexed_texts, device=device, dtype=torch.float)
 
 
 class Vocabulary:
