@@ -69,8 +69,14 @@ parser.add_argument("--frames-per-proc", type=int, default=None,
                     help="number of frames per process before update (default: 5 for A2C and 128 for PPO)")
 parser.add_argument("--discount", type=float, default=0.99,
                     help="discount factor (default: 0.99)")
-parser.add_argument("--lr", type=float, default=0.001,
-                    help="learning rate (default: 0.001)")
+parser.add_argument("--lr_f", type=float, default=0.001,
+                    help="learning rate for feature (default: 0.001)")
+parser.add_argument("--lr_a", type=float, default=0.001,
+                    help="learning rate for actor (default: 0.001)")
+parser.add_argument("--lr_sr", type=float, default=0.001,
+                    help="learning rate for SR (default: 0.001)")
+parser.add_argument("--lr_r", type=float, default=0.001/30,
+                    help="learning rate for reward (default: 0.001/30)")
 parser.add_argument("--gae-lambda", type=float, default=0.95,
                     help="lambda coefficient in GAE formula (default: 0.95, 1 means no gae)")
 parser.add_argument("--entropy-coef", type=float, default=0.005,
@@ -209,7 +215,12 @@ elif args.algo == "ppo":
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
+<<<<<<< HEAD
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+=======
+    reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
+    algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
+>>>>>>> 76c02d9e09aca639449094236f013802a6c9ebaa
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward)

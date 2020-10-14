@@ -10,15 +10,14 @@ from algos.baseSR import BaseSRAlgo
 
 class SRAlgo(BaseSRAlgo):
 
-    def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99, lr=0.01, gae_lambda=0.95,
-                 entropy_coef=0.01, sr_loss_coef=1, policy_loss_coef=1,recon_loss_coef=1,reward_loss_coef=1,norm_loss_coef=1,
-                 max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200,batch_size=300, preprocess_obss=None, reshape_reward=None):
+    def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
+        lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, entropy_coef=0.01, sr_loss_coef=1, policy_loss_coef=1,recon_loss_coef=1,reward_loss_coef=1,norm_loss_coef=1,
+        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200,batch_size=300, preprocess_obss=None, reshape_reward=None):
  
         num_frames_per_proc = num_frames_per_proc or 200
 
-        super().__init__(envs, model, target, device, num_frames_per_proc, discount, lr, gae_lambda, 
-                         max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
-
+        super().__init__(envs, model, target, device, num_frames_per_proc, discount,  lr_feature, gae_lambda, max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
+      
         self.norm_loss_coef = norm_loss_coef
         self.entropy_coef = entropy_coef
         self.sr_loss_coef = sr_loss_coef
@@ -33,16 +32,18 @@ class SRAlgo(BaseSRAlgo):
         #self.feature_params = itertools.chain(*params)
         
         #self.feature_optimizer = torch.optim.RMSprop(self.feature_params, lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
-        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.feature_out.parameters()}, {'params': self.model.actor.parameters()}],
-                                                     lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
-        #self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
-         #                                 lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
+
+        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.feature_out.parameters()},
+                                                      {'params': self.model.actor.parameters()}],
+                                                     lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
+        self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+                                          lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
         
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
-                                          lr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
+                                          lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
           
         self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
-                                          lr/30,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
+                                          lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
         
         self.num_updates = 0
         
