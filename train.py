@@ -6,20 +6,6 @@ import utils
 import copy
 import numpy as np
 import yaml
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --lr 0.001 --target-update 100 --recon-loss-coef 5 --entropy-coef 0.005', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
-
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args='--seed 2 --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input flat --feature-learn curiosity --lr 0.0001 --target-update 50 --recon-loss-coef 5 --entropy-coef 0.005 --memory-cap 800 --batch-size 100 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
-
-#NOWL
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input ssp --feature-learn curiosity --lr 0.001 --target-update 1 --recon-loss-coef 5 --entropy-coef 0.005 --batch-size 300 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
-
-# delenvs = []
-# for env in gym.envs.registry.env_specs:
-#      if 'MiniGrid' in env:
-#           #print("Remove {} from registry".format(env))
-#           delenvs.append(env)
-# for env in delenvs:
-#     del gym.envs.registry.env_specs[env]
 
 import tensorboardX
 import sys
@@ -30,6 +16,14 @@ from algos.sr_a2c import SRAlgo
 from algos.a2c import A2CAlgo
 from algos.ppo import PPOAlgo
 from models.model_SR import SRModel
+
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --target-update 100 --recon-loss-coef 5 --entropy-coef 0.005', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args='--seed 2 --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input flat --feature-learn curiosity --target-update 50 --recon-loss-coef 5 --entropy-coef 0.005 --memory-cap 800 --batch-size 100 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+
+#
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input ssp --feature-learn curiosity --target-update 1 --recon-loss-coef 5 --entropy-coef 0.005 --batch-size 300 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+
 
 
 # Parse arguments
@@ -215,12 +209,8 @@ elif args.algo == "ppo":
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
-<<<<<<< HEAD
-    algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
-=======
     reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
->>>>>>> 76c02d9e09aca639449094236f013802a6c9ebaa
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward)

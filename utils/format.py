@@ -31,7 +31,7 @@ def get_obss_preprocessor(obs_space):
                     "text": preprocess_images([obs["mission"] for obs in obss], device=device)
                 })
         else:
-            obs_space = {"image": obs_space.spaces["image"].shape, "text": 100}
+            obs_space = {"image": obs_space.spaces["image"].shape, "text": (100,)}
 
             vocab = Vocabulary(obs_space["text"])
             vocab.load_vocab( dict(zip( [str(i) for i in range(10)], list(np.arange(10)))) )

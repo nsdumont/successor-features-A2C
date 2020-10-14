@@ -45,13 +45,16 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
 
         if input_type == "image":
             self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text)
+            self.goal_embedding_size = self.feature_in.other.text_embedding_size
         elif input_type=="flat":
             self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text)
+            self.goal_embedding_size = self.feature_in.other.text_embedding_size
         elif input_type=="ssp":
             self.feature_in = InputModule(obs_space,obs_space["image"][0],use_memory=use_memory,use_text=use_text)
+            self.goal_embedding_size = self.feature_in.input_embedding_size
+
             
         self.image_embedding_size = self.feature_in.input_embedding_size
-        self.goal_embedding_size = self.feature_in.other.text_embedding_size
         self.embedding_size = self.feature_in.embedding_size
             
         if feature_learn=="reconstruction" and input_type=="image":

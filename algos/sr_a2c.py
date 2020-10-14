@@ -112,16 +112,12 @@ class SRAlgo(BaseSRAlgo):
             entropy = dist.entropy().mean()
             
             with torch.no_grad():
-                #SR_advanage_dot_R2 = self.target.reward2(sb.SR_advantage).reshape(-1) #modle or target 
                 _,_,_,_,_,_,r_vec,_ = self.target(sb.obs,memory= memory * sb.mask)
                 SR_advanage_dot_R = torch.sum(r_vec * sb.SR_advantage, 1)
                 value_loss = (value - sb.returnn).pow(2).mean() # not used for optimization, just for logs
 
             
             A_diff = F.mse_loss(SR_advanage_dot_R, sb.V_advantage)
-            #if self.num_updates < -1:
-            #    policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
-            #else:
             policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
             actor_loss = policy_loss - self.entropy_coef * entropy 
         
