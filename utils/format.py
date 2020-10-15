@@ -33,7 +33,7 @@ def get_obss_preprocessor(obs_space):
         else:
             obs_space = {"image": obs_space.spaces["image"].shape, "text": (100,)}
 
-            vocab = Vocabulary(obs_space["text"])
+            vocab = Vocabulary(obs_space["text"][0])
             vocab.load_vocab( dict(zip( [str(i) for i in range(10)], list(np.arange(10)))) )
             def preprocess_obss(obss, device=None):
                 return torch_ac.DictList({

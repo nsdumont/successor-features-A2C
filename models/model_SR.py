@@ -51,7 +51,7 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
             self.goal_embedding_size = self.feature_in.other.text_embedding_size
         elif input_type=="ssp":
             self.feature_in = InputModule(obs_space,obs_space["image"][0],use_memory=use_memory,use_text=use_text)
-            self.goal_embedding_size = self.feature_in.input_embedding_size
+            self.goal_embedding_size = self.feature_in.text_embedding_size
 
             
         self.image_embedding_size = self.feature_in.input_embedding_size

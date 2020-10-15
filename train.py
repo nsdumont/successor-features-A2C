@@ -17,9 +17,7 @@ from algos.a2c import A2CAlgo
 from algos.ppo import PPOAlgo
 from models.model_SR import SRModel
 
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --target-update 100 --recon-loss-coef 5 --entropy-coef 0.005', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
-
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args='--seed 2 --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input flat --feature-learn curiosity --target-update 50 --recon-loss-coef 5 --entropy-coef 0.005 --memory-cap 800 --batch-size 100 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --target-update 10 --recon-loss-coef 5 --entropy-coef 0.005 --batch-size 300 --frames-per-proc 100 ', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C'
 
 #
 #runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input ssp --feature-learn curiosity --target-update 1 --recon-loss-coef 5 --entropy-coef 0.005 --batch-size 300 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
@@ -63,14 +61,18 @@ parser.add_argument("--frames-per-proc", type=int, default=None,
                     help="number of frames per process before update (default: 5 for A2C and 128 for PPO)")
 parser.add_argument("--discount", type=float, default=0.99,
                     help="discount factor (default: 0.99)")
-parser.add_argument("--lr_f", type=float, default=0.001,
+
+parser.add_argument("--lr", type=float, default=0.001,
+                    help="learning rate for all (default: 0.001)")
+parser.add_argument("--lr_f", type=float, default=None,
                     help="learning rate for feature (default: 0.001)")
-parser.add_argument("--lr_a", type=float, default=0.001,
+parser.add_argument("--lr_a", type=float, default=None,
                     help="learning rate for actor (default: 0.001)")
-parser.add_argument("--lr_sr", type=float, default=0.001,
+parser.add_argument("--lr_sr", type=float, default=None,
                     help="learning rate for SR (default: 0.001)")
-parser.add_argument("--lr_r", type=float, default=0.001/30,
+parser.add_argument("--lr_r", type=float, default=None,
                     help="learning rate for reward (default: 0.001/30)")
+
 parser.add_argument("--gae-lambda", type=float, default=0.95,
                     help="lambda coefficient in GAE formula (default: 0.95, 1 means no gae)")
 parser.add_argument("--entropy-coef", type=float, default=0.005,
@@ -122,6 +124,13 @@ parser.add_argument("--env-args", type=yaml.load, default={},
 args = parser.parse_args()
 
 args.mem = args.recurrence > 1
+
+
+args.lr_a = args.lr_a or args.lr
+args.lr_sr = args.lr_sr or args.lr
+args.lr_f = args.lr_f or args.lr
+args.lr_r = args.lr_r or args.lr/30
+
 
 # Set run dir
 
@@ -313,4 +322,4 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 data = pd.read_csv(model_dir + "/log.csv")
-sns.lineplot(x="update", y='return_mean', data=data)
+sns.lineplot(x="frames", y='return_mean', data=data)
