@@ -164,6 +164,9 @@ class InputModule(nn.Module):
         self.embedding_size = self.input_embedding_size
         if self.use_text:
             self.embedding_size += self.text_embedding_size
+        
+        self.embed_text0 = torch.zeros((1,self.text_embedding_size))
+
     
     def _get_embed_text(self, text):
         #_, hidden = self.text_layer(self.word_embedding(text))
@@ -192,7 +195,8 @@ class InputModule(nn.Module):
             embed_text = self._get_embed_text(obs.text)
             embedding = torch.cat((embedding, embed_text), dim=1)
         else:
-            embed_text = torch.zeros((obs.text.shape[0],self.text_embedding_size))
+            embed_text = self.embed_text0.repeat(obs.text.shape[0],1)
+            #torch.zeros((obs.text.shape[0],self.text_embedding_size)
             
         return embedding, memory, embed_text
     
