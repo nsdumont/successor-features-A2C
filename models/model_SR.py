@@ -33,7 +33,7 @@ def init_params2(m):
     
 
 class SRModel(nn.Module, torch_ac.RecurrentACModel):
-    def __init__(self, obs_space, action_space, use_memory=False, use_text=False,
+    def __init__(self, obs_space, action_space, device, use_memory=False, use_text=False,
                  input_type="image", feature_learn="curiosity"):
         super().__init__()
 
@@ -42,15 +42,16 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         self.use_memory = use_memory
         self.n_actions = action_space.n
         self.feature_learn = feature_learn
+        self.device = device
 
         if input_type == "image":
-            self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text)
+            self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text,device=device)
             self.goal_embedding_size = self.feature_in.other.text_embedding_size
         elif input_type=="flat":
-            self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text)
+            self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text,device=device)
             self.goal_embedding_size = self.feature_in.other.text_embedding_size
         elif input_type=="ssp":
-            self.feature_in = InputModule(obs_space,obs_space["image"][0],use_memory=use_memory,use_text=use_text)
+            self.feature_in = InputModule(obs_space,obs_space["image"][0],use_memory=use_memory,use_text=use_text,device=device)
             self.goal_embedding_size = self.feature_in.text_embedding_size
 
             
@@ -138,11 +139,12 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
 
 ## Add-ons that use memory (LSTMs) and text input
 class InputModule(nn.Module):
-    def __init__(self,obs_space, input_embedding_size, use_memory, use_text):
+    def __init__(self,obs_space, input_embedding_size, use_memory, use_text, device):
         super(InputModule, self).__init__()
         self.use_text = use_text
         self.use_memory = use_memory
         self.input_embedding_size = input_embedding_size
+        self.device = device
         
         # Define memory
         if self.use_memory:
@@ -195,14 +197,13 @@ class InputModule(nn.Module):
             embed_text = self._get_embed_text(obs.text)
             embedding = torch.cat((embedding, embed_text), dim=1)
         else:
-            embed_text = self.embed_text0.repeat(obs.text.shape[0],1)
-            #torch.zeros((obs.text.shape[0],self.text_embedding_size)
+            embed_text = torch.zeros((obs.text.shape[0],self.text_embedding_size), device=self.device)
             
         return embedding, memory, embed_text
     
 ## Features from image data 
 class ImageInput(nn.Module):
-    def __init__(self, obs_space, use_memory, use_text):
+    def __init__(self, obs_space, use_memory, use_text,device):
         super(ImageInput, self).__init__()
         self.use_text = use_text
         self.use_memory = use_memory
@@ -219,7 +220,7 @@ class ImageInput(nn.Module):
             nn.Tanh()
         )
         
-        self.other = InputModule(obs_space, self.input_embedding_size, use_memory=use_memory, use_text=use_text )
+        self.other = InputModule(obs_space, self.input_embedding_size, use_memory=use_memory, use_text=use_text, device=device )
         self.embedding_size = self.other.embedding_size
         
     def forward(self, obs, memory):
@@ -234,7 +235,7 @@ class ImageInput(nn.Module):
    
 ## Features from flat input (e.g. one hot, ssps)
 class FlatInput(nn.Module):
-    def __init__(self, obs_space,use_memory,  use_text, input_embedding_size=200, hidden_size=256):
+    def __init__(self, obs_space,use_memory,  use_text, device, input_embedding_size=200, hidden_size=256):
         super(FlatInput, self).__init__()
         self.input_dim = obs_space["image"][0]
         self.input_embedding_size = self.input_dim# input_embedding_size
@@ -242,7 +243,7 @@ class FlatInput(nn.Module):
             nn.Linear(self.input_dim, self.input_embedding_size),#nn.Tanh()
             nn.Tanh()
         )
-        self.other = InputModule(obs_space, self.input_embedding_size, use_text, use_memory)
+        self.other = InputModule(obs_space, self.input_embedding_size, use_text, use_memory, device)
         self.embedding_size = self.other.embedding_size
         
     def forward(self, obs, memory):

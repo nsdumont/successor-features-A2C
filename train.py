@@ -194,7 +194,7 @@ txt_logger.info("Observations preprocessor loaded")
 
 # Load model
 if args.algo == "sr":
-    model = SRModel(obs_space, envs[0].action_space, args.mem, args.text, args.input, args.feature_learn)
+    model = SRModel(obs_space, envs[0].action_space, device, args.mem, args.text, args.input, args.feature_learn)
 else:
     model = ACModel(obs_space, envs[0].action_space, args.mem, args.text)
 target = copy.deepcopy(model)
