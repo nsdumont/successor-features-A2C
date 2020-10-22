@@ -36,14 +36,17 @@ class SRAlgo(BaseSRAlgo):
         self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.feature_out.parameters()},
                                                       {'params': self.model.actor.parameters()}],
                                                      lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
-        self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
-                                          lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
+        #self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+         #                                 lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
         
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
                                           lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
           
-        self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
+        self.reward_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.reward.parameters()}],
                                           lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
+        
+        #self.optimizer =  torch.optim.RMSprop(self.model.parameters(),
+         #                                 lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) 
         
         self.num_updates = 0
         
@@ -118,8 +121,10 @@ class SRAlgo(BaseSRAlgo):
 
             
             A_diff = F.mse_loss(SR_advanage_dot_R, sb.V_advantage)
-            policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
-            actor_loss = policy_loss - self.entropy_coef * entropy 
+            #policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
+            policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
+
+            actor_loss = policy_loss - self.entropy_coef * entropy
         
             # Update batch values
             update_entropy += entropy.item()
@@ -169,18 +174,17 @@ class SRAlgo(BaseSRAlgo):
         update_reward_loss = F.smooth_l1_loss(reward, batch_reward.squeeze()) 
 
 
-    
         self.model.zero_grad()
         update_reward_loss.backward(retain_graph=True)
         update_grad_norm_reward = sum(p.grad.data.norm(2) ** 2 for p in self.model.reward.parameters()) ** 0.5
         torch.nn.utils.clip_grad_norm_(self.model.reward.parameters(), self.max_grad_norm)
         self.reward_optimizer.step()
         
-        # self.model.zero_grad()
-        # update_actor_loss.backward(retain_graph=True)
-        # update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 for p in self.model.actor.parameters()) ** 0.5
-        # torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
-        # self.actor_optimizer.step()
+        # # self.model.zero_grad()
+        # # update_actor_loss.backward(retain_graph=True)
+        # # update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 for p in self.model.actor.parameters()) ** 0.5
+        # # torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
+        # # self.actor_optimizer.step()
         
         self.model.zero_grad()
         update_loss = self.recon_loss_coef*update_feature_loss + update_actor_loss
@@ -192,7 +196,13 @@ class SRAlgo(BaseSRAlgo):
         
         update_grad_norm = np.max([ update_grad_norm_reward.item(),update_grad_norm_sr.item()]) #update_grad_norm_sr.item()
 
-        #update_grad_norm=0
+        # self.model.zero_grad
+        # update_loss = update_sr_loss+update_reward_loss   +update_actor_loss+ self.recon_loss_coef*update_feature_loss
+        # update_loss.backward(retain_graph=False)
+        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+        # self.optimizer.step()
+        # update_grad_norm=0
+        
         # Log some values
 
         logs = {

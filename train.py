@@ -165,7 +165,7 @@ txt_logger.info(f"Device: {device}\n")
 envs = []
 if args.input =='ssp':
     import nengo_ssp as ssp
-    from gym_minigrid.wrappers import SSPWrapper
+    from gym_minigrid.wrappers import SSPWrapper, SSPWrapper2
 
     X,Y,_ = ssp.HexagonalBasis(10,10)
     d = len(X.v)
