@@ -12,7 +12,7 @@ class SRAlgo(BaseSRAlgo):
 
     def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
         lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, entropy_coef=0.01, sr_loss_coef=1, policy_loss_coef=1,recon_loss_coef=1,reward_loss_coef=1,norm_loss_coef=1,
-        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200,batch_size=300, preprocess_obss=None, reshape_reward=None):
+        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200,batch_size=300, preprocess_obss=None, reshape_reward=None, use_V_advantage=False):
  
         num_frames_per_proc = num_frames_per_proc or 200
 
@@ -25,6 +25,7 @@ class SRAlgo(BaseSRAlgo):
         self.recon_loss_coef = recon_loss_coef
         self.reward_loss_coef = reward_loss_coef
         self.feature_learn = feature_learn
+        self.use_V_advantage = use_V_advantage
         
         self.batch_size=batch_size
         
@@ -41,8 +42,12 @@ class SRAlgo(BaseSRAlgo):
         
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
                                           lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
-          
-        self.reward_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.reward.parameters()}],
+        if model.input_type == "ssp":
+            self.reward_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.other.parameters()},{'params': self.model.reward.parameters()}],
+                                          lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
+        
+        else:
+            self.reward_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.other.parameters()},{'params': self.model.reward.parameters()}],
                                           lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
         
         #self.optimizer =  torch.optim.RMSprop(self.model.parameters(),
@@ -100,7 +105,7 @@ class SRAlgo(BaseSRAlgo):
             
             # Feature loss
             if self.feature_learn == "reconstruction":
-                reconstruction_loss = F.mse_loss(predictions, sb.obs.image)
+                reconstruction_loss = F.mse_loss(predictions, sb.obs[:-1].image)
             elif self.feature_learn=="curiosity":
                 next_embedding, next_obs_pred, action_pred = predictions
                 forward_loss = F.mse_loss(next_obs_pred , next_embedding)
@@ -122,7 +127,11 @@ class SRAlgo(BaseSRAlgo):
             
             A_diff = F.mse_loss(SR_advanage_dot_R, sb.V_advantage)
             #policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
-            policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
+            if self.use_V_advantage:
+                policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
+            else:
+                policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
+
 
             actor_loss = policy_loss - self.entropy_coef * entropy
         

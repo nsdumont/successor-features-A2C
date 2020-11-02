@@ -9,7 +9,7 @@ import gym
 import gym_minigrid
 
 
-def make_env(env_key, env_args=None, seed=None):
+def make_env(env_key, seed=None, env_args={}):
     env = gym.make(env_key, **env_args)
     env.seed(seed)
     return env

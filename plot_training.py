@@ -23,7 +23,7 @@ model = args.model
 
 model_dir = utils.get_model_dir(model)
 data = pd.read_csv(model_dir + "/log.csv")#,skiprows=lambda x: ((x != 0) and not x % 2 and x<19 ) or (x > 100))
-g = sns.lineplot(x="update", y='return_mean', data=data)
+g = sns.lineplot(x="frames", y='return_mean', data=data)
 #data['return_mean'].rolling(100).mean().plot()
 #plt.axhline(90,color="orange",linewidth =1.5)
 g.set(xlabel = 'Environment Observations', ylabel = 'Mean Return')

@@ -185,6 +185,8 @@ class BaseSRAlgo(ABC):
                 obs, reward, done, _ = self.env.step(action.cpu().numpy())
 
             # Update experiences values
+            #preprocessed_obs_new = self.preprocess_obss(obs, device=self.device)
+
             self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
                                      self.FloatTensor([reward])))
 

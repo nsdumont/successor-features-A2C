@@ -45,12 +45,13 @@ parser.add_argument("--procs", type=int, default=1,
                     help="number of processes (default: 5)")
 parser.add_argument("--frames", type=int, default=10**7,
                     help="number of frames of training (default: 1e7)")
-parser.add_argument("--load-optimizer-state", type=bool, default=True,
+parser.add_argument("--load-optimizer-state", type=int, default=1,
                     help="If True and a logs for this model (defined by model arg) exist then load the optimizer info from last run. Otherwise do not.")
 
 parser.add_argument("--target-update", type=int, default=100,
                     help="how often to update the target network") # right now only set up for sr algo
 
+parser.add_argument("--use-V-advantage", type=int, default=0,help="")
 
 ## Parameters for main algorithm
 parser.add_argument("--epochs", type=int, default=4,
@@ -165,15 +166,18 @@ txt_logger.info(f"Device: {device}\n")
 envs = []
 if args.input =='ssp':
     import nengo_ssp as ssp
-    from gym_minigrid.wrappers import SSPWrapper, SSPWrapper2
+    from gym_minigrid.wrappers import SSPWrapper#, SSPWrapper2
 
     X,Y,_ = ssp.HexagonalBasis(10,10)
     d = len(X.v)
     for i in range(args.procs):
-        envs.append(SSPWrapper( utils.make_env(args.env,args.env_args, args.seed + 10000 * i),d,X,Y,delta=2, rng=np.random.RandomState(args.seed)))
+        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i,args.env_args),d,X,Y,delta=2, rng=np.random.RandomState(args.seed)))
+#elif args.input=='flat'
+#one hot wrapper
+    
 else: # flat (won't work for minigrid envs but will for others) or image
     for i in range(args.procs):
-        envs.append(utils.make_env(args.env,args.env_args, args.seed + 10000 * i))
+        envs.append(utils.make_env(args.env,args.seed + 10000 * i,args.env_args))
 
 txt_logger.info("Environments loaded\n")
 
@@ -218,11 +222,11 @@ elif args.algo == "ppo":
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
-    reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
+    #reshape_reward = lambda o,a,r,d: -1 if r==0 else 1 
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
-                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward)
+                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward, args.use_V_advantage)
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
@@ -235,7 +239,7 @@ txt_logger.info("Optimizer loaded\n")
 num_frames = status["num_frames"]
 update = status["update"]
 start_time = time.time()
-first_line=True
+first_line=num_frames==0
 
 while num_frames < args.frames:
     # Update model parameters
@@ -293,7 +297,7 @@ while num_frames < args.frames:
 
         if first_line:
             csv_logger.writerow(header)
-        first_line = False
+            first_line = False
         csv_logger.writerow(data)
         csv_file.flush()
 
