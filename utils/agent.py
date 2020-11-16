@@ -19,7 +19,7 @@ class Agent:
         if model_name == 'ac':
             self.acmodel = ACModel(obs_space, action_space, use_memory=use_memory, use_text=use_text)
         elif model_name == 'sr':
-            self.acmodel = SRModel(obs_space, action_space, input_type=input_type,
+            self.acmodel = SRModel(obs_space, action_space, device, input_type=input_type,
                                    use_memory=use_memory, use_text=use_text,feature_learn=feature_learn)
         self.model_name = model_name
         self.device = device
@@ -46,9 +46,9 @@ class Agent:
                     dist, _ = self.acmodel(preprocessed_obss)
             elif self.model_name == 'sr':
                 if self.acmodel.recurrent:
-                    dist, _, _, _, _, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
+                    dist, _, _, _, _, _, _,self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
                 else:
-                    dist, _, _, _, _, _ = self.acmodel(preprocessed_obss)
+                    dist, _, _, _, _, _,_ = self.acmodel(preprocessed_obss)
 
 
         if self.argmax:

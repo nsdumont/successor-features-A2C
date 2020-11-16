@@ -5,8 +5,9 @@ import torch
 import matplotlib.pyplot as plt
 import utils
 import gym
-from gym_minigrid.wrappers import SSPWrapper
+import yaml
 
+from gym_minigrid.wrappers import SSPWrapper
 
 #runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/visualize_agent.py',args= ' --algo sr --env MiniGrid-Empty-6x6-v0 --model MiniGrid-Empty-6x6-v0_sr_seed1_20-09-02-19-35-44 --input flat --feature-learn curiosity', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
 
@@ -41,6 +42,8 @@ parser.add_argument("--feature-learn", type=str, default="curiosity",
                     help="feature learning")
 parser.add_argument("--continous-action", type=bool, default=False,
                     help=" ")
+parser.add_argument("--env-args", type=yaml.load, default={},
+                    help="")
 
 
 args = parser.parse_args()
@@ -56,8 +59,8 @@ print(f"Device: {device}\n")
 
 # Load environment
 
-env = utils.make_env(args.env, args.seed)
-if args.input =='flat':
+env = utils.make_env(args.env, seed=args.seed,env_args=args.env_args)
+if args.input =='ssp':
     import nengo_ssp as ssp
     X,Y,_ = ssp.HexagonalBasis(10,10)
     d = len(X.v)

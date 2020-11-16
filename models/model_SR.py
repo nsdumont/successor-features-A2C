@@ -43,6 +43,7 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         self.n_actions = action_space.n
         self.feature_learn = feature_learn
         self.device = device
+        self.input_type = input_type
 
         if input_type == "image":
             self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text,device=device)
@@ -51,10 +52,10 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
             self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text,device=device)
             self.goal_embedding_size = self.feature_in.other.text_embedding_size
         elif input_type=="ssp":
-            #self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text,device=device)
+            self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text,device=device)
 
-            self.feature_in = InputModule(obs_space,obs_space["image"][0],use_memory=use_memory,use_text=use_text,device=device)
-            self.goal_embedding_size = self.feature_in.text_embedding_size
+            #self.feature_in = InputModule(obs_space,obs_space["image"][0],use_memory=use_memory,use_text=use_text,device=device)
+            self.goal_embedding_size = self.feature_in.other.text_embedding_size
 
             
         self.image_embedding_size = self.feature_in.input_embedding_size
