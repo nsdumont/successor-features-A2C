@@ -12,7 +12,7 @@ import sys
 
 from models.model import ACModel
 
-from algos.sr_a2c import SRAlgo
+#from algos.sr_a2c import SRAlgo
 from algos.a2c import A2CAlgo
 from algos.ppo import PPOAlgo
 from models.model_SR import SRModel
@@ -22,7 +22,7 @@ from models.model_SR import SRModel
 #
 #runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input ssp --feature-learn curiosity --target-update 1 --recon-loss-coef 5 --entropy-coef 0.005 --batch-size 300 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
 
-
+torch.autograd.set_detect_anomaly(True)
 
 # Parse arguments
 
@@ -193,7 +193,7 @@ if "vocab" in status:
 txt_logger.info("Observations preprocessor loaded")
 
 # Load model
-if args.algo == "sr":
+if args.algo == "sr" or "sr_ppo":
     model = SRModel(obs_space, envs[0].action_space, device, args.mem, args.text, args.input, args.feature_learn)
 else:
     model = ACModel(obs_space, envs[0].action_space, args.mem, args.text)
@@ -218,11 +218,21 @@ elif args.algo == "ppo":
                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
+    from algos.sr_a2c import SRAlgo
     reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward)
+
+elif args.algo == "sr_ppo":
+    from algos.sr_ppo import SRAlgo
+    reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
+    algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
+                            args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
+                            args.max_grad_norm, args.recurrence,
+                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward, args.clip_eps)
+    
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
@@ -270,7 +280,7 @@ while num_frames < args.frames:
         data += rreturn_per_episode.values()
         header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
         data += num_frames_per_episode.values()
-        if args.algo == "sr":
+        if args.algo == "sr" or "sr_ppo":
             header += ["entropy", "value_loss", "policy_loss", "sr_loss",
                        "reconstruction_loss","reward_loss","norm_loss", "grad_norm", "A_mse",]
             data += [logs["entropy"], logs["value_loss"], logs["policy_loss"], logs["sr_loss"],
@@ -304,7 +314,7 @@ while num_frames < args.frames:
     # Save status
 
     if args.save_interval > 0 and update % args.save_interval == 0:
-        if args.algo == "sr":
+        if args.algo == "sr" or "sr_ppo":
             status = {"num_frames": num_frames, "update": update,
                   "model_state": model.state_dict(),
                   "sr_optimizer_state": algo.sr_optimizer.state_dict(),# "actor_optimizer_state": algo.actor_optimizer.state_dict(),
