@@ -18,7 +18,7 @@ def get_obss_preprocessor(obs_space):
         def preprocess_obss(obss, device=None):
             return torch_ac.DictList({
                 "image": preprocess_images(obss, device=device)
-            })
+                })
 
     # Check if it is a MiniGrid observation space
     elif isinstance(obs_space, gym.spaces.Dict) and ("image" in list(obs_space.spaces.keys())):

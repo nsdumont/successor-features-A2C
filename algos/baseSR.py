@@ -7,6 +7,8 @@ from torch_ac.utils import DictList, ParallelEnv
 from ReplayMemory import ReplayMemory
 
 
+import numpy as np
+
 class BaseSRAlgo(ABC):
     """The base class for RL algorithms."""
 
@@ -169,26 +171,40 @@ class BaseSRAlgo(ABC):
             
             if self.continuous_action:
                 # Should this (eps + stochastic policy) be done? Or use (eps + det policy) or just stochastic policy?
-                epsample = random.random()
-                eps_threshold = 0.02 + (0.9 - 0.02) * math.exp(-1. * self.total_updates / 200)
-                if epsample > eps_threshold:
-                    noise_dist = torch.distributions.normal.Normal(0, 0.03)
-                    action = dist.sample() + noise_dist.sample()
-                    action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action)
-                else:
+                # epsample = random.random()
+                # eps_threshold = 0.02 + (0.9 - 0.02) * math.exp(-1. * self.total_updates / 200)
+                # if epsample > eps_threshold:
+                #     noise_dist = torch.distributions.normal.Normal(0, 0.03)
+                action = dist.sample()# + noise_dist.sample()
+                action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action).reshape(-1)#.item()
+                if torch.isnan(action):
                     action = torch.Tensor(self.env.envs[0].action_space.sample())
+                # else:
+                #     action = torch.Tensor(self.env.envs[0].action_space.sample())
                
-                obs, reward, done, _ = self.env.step([action.cpu().numpy()])
+                obs, reward, done, _ = self.env.step([action])
+                
                 obs = (obs[0].reshape(1,-1)) ##
+                
+                # try:
+                #     if np.any(np.isnan(obs[0])):
+                #         obs
+                # except TypeError:
+                #     obs
+                #change
+                self.replay_memory.push((preprocessed_obs.image, torch.zeros(1),
+                                     self.FloatTensor([reward])))
             else:
                 action = dist.sample()
                 obs, reward, done, _ = self.env.step(action.cpu().numpy())
+                
+                self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
+                                     self.FloatTensor([reward])))
 
             # Update experiences values
             #preprocessed_obs_new = self.preprocess_obss(obs, device=self.device)
 
-            self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
-                                     self.FloatTensor([reward])))
+            
 
 
             self.obss[i] = self.obs
@@ -212,7 +228,15 @@ class BaseSRAlgo(ABC):
                 ], device=self.device)
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
-            self.log_probs[i] = dist.log_prob(action)
+            if self.continuous_action:
+                self.log_probs[i] = torch.exp(-0.5*(action - dist.mean).pow(2)/dist.stddev.pow(2))/(dist.stddev*2*np.pi)
+
+            else:
+                self.log_probs[i] = dist.log_prob(action)
+
+##TODO:
+    #for continuous actions need to collect mean and var as well so that they can be used in ppo ratio
+
 
             # Update log values
 

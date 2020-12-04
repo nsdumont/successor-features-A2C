@@ -34,16 +34,18 @@ def init_params2(m):
 
 class SRModel(nn.Module, torch_ac.RecurrentACModel):
     def __init__(self, obs_space, action_space, device, use_memory=False, use_text=False,
-                 input_type="image", feature_learn="curiosity"):
+                 input_type="image", feature_learn="curiosity",obs_space_sampler=None):
         super().__init__()
 
         # Decide which components are enabled
         self.use_text = use_text
         self.use_memory = use_memory
-        self.n_actions = action_space.n
+        
         self.feature_learn = feature_learn
         self.device = device
         self.input_type = input_type
+        
+        
 
         if input_type == "image":
             self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text,device=device)
@@ -60,6 +62,21 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
             
         self.image_embedding_size = self.feature_in.input_embedding_size
         self.embedding_size = self.feature_in.embedding_size
+        
+        # Define actor's model
+        if type(action_space) == Box:
+            import sklearn.preprocessing
+            self.n_actions = action_space.shape[0]
+            self.actor = ContinuousActor(self.embedding_size,self.n_actions)
+            self.continuous_action = True
+            state_space_samples = np.array([obs_space_sampler.sample() for x in range(10000)])
+            scaler = sklearn.preprocessing.StandardScaler()
+            scaler.fit(state_space_samples)
+            self.scaler = scaler
+        else:
+            self.n_actions = action_space.n
+            self.actor = DiscreteActor(self.embedding_size,self.n_actions)
+            self.continuous_action = False
             
         if feature_learn=="reconstruction" and input_type=="image":
             self.feature_out = ImageReconstruction()
@@ -85,13 +102,7 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         )
         
         
-        # Define actor's model
-        if type(action_space) == Box:
-            self.actor = ContinuousActor(self.embedding_size,self.n_actions)
-            self.continuous_action = True
-        else:
-            self.actor = DiscreteActor(self.embedding_size,self.n_actions)
-            self.continuous_action = False
+        
         
 
         # Initialize parameters correctly
@@ -116,8 +127,8 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         #w=0
         #w = self.reward.w #
         #w = self.reward[0](embed_goal)
-        r_vec = self.reward(embed_goal)
-        reward =  torch.sum(r_vec * embedding,1)
+        r_vec = self.reward(embed_goal) 
+        reward =  torch.sum(r_vec * embedding,1) 
         #reward2 = self.reward2(embedding).squeeze(1)
         
         with torch.no_grad():
@@ -155,7 +166,7 @@ class InputModule(nn.Module):
 
         # Define text embedding
         if self.use_text:
-            self.text_embedding_size = input_embedding_size
+            self.text_embedding_size = 5
 
            # self.word_embedding_size = 2#32
             #self.word_embedding = nn.Embedding(obs_space["text"], self.word_embedding_size)
@@ -167,8 +178,8 @@ class InputModule(nn.Module):
 
         # Resize image embedding
         self.embedding_size = self.input_embedding_size
-        if self.use_text:
-            self.embedding_size += self.text_embedding_size
+        #if self.use_text:
+         #   self.embedding_size += self.text_embedding_size
         
         self.embed_text0 = torch.zeros((1,self.text_embedding_size))
 
@@ -198,9 +209,10 @@ class InputModule(nn.Module):
 
         if self.use_text:
             embed_text = self._get_embed_text(obs.text)
-            embedding = torch.cat((embedding, embed_text), dim=1)
+           # embedding = torch.cat((embedding, embed_text), dim=1)
         else:
-            embed_text = torch.zeros((obs.text.shape[0],self.text_embedding_size), device=self.device)
+            #if 'text' 
+            embed_text = torch.zeros((len(obs),self.text_embedding_size), device=self.device)
             
         return embedding, memory, embed_text
     
@@ -246,7 +258,8 @@ class FlatInput(nn.Module):
             nn.Linear(self.input_dim, self.input_embedding_size),#nn.Tanh()
             nn.Tanh()
         )
-        self.other = InputModule(obs_space, self.input_embedding_size, use_text, use_memory, device)
+        self.other = InputModule(obs_space, self.input_embedding_size, 
+                                 use_text=use_text, use_memory=use_memory, device=device)
         self.embedding_size = self.other.embedding_size
         
     def forward(self, obs, memory):
@@ -315,7 +328,7 @@ class Curiosity(nn.Module):
         if self.n_actions > 1:
             action = F.one_hot(action.long(), num_classes=self.n_actions).float()
         else:
-            action = action.float()
+            action = action.float().reshape(-1,1)
         forward_input = torch.cat((embedding, action), 1)
         next_obs_pred = self.forward_model(forward_input)
         
@@ -365,6 +378,6 @@ class ContinuousActor(nn.Module):
     def forward(self, embedding):
         x = self.actor(embedding)
         mean = self.mean(x)
-        scale = self.var(x) + 1e-7
+        scale = self.var(x) + 1e-16
         dist = torch.distributions.normal.Normal(mean, scale)
         return dist

@@ -19,10 +19,10 @@ from models.model_SR import SRModel
 
 #runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input image --feature-learn curiosity --target-update 10 --recon-loss-coef 5 --entropy-coef 0.005 --batch-size 300 --frames-per-proc 100 ', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C'
 
-#
+#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr_ppo --env MountainCarContinuous-v0 --frames 100000 --input flat --feature-learn curiosity --target-update 10 --recon-loss-coef 0.5 --entropy-coef 0.005 --batch-size 100 --frames-per-proc 10 --lr 0.01', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
 #runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/train.py',args=' --algo sr --env MiniGrid-Empty-6x6-v0 --frames 100000 --input ssp --feature-learn curiosity --target-update 1 --recon-loss-coef 5 --entropy-coef 0.005 --batch-size 300 --frames-per-proc 10', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
 
-torch.autograd.set_detect_anomaly(True)
+#torch.autograd.set_detect_anomaly(True)
 
 # Parse arguments
 
@@ -198,7 +198,7 @@ txt_logger.info("Observations preprocessor loaded")
 
 # Load model
 if args.algo == "sr" or "sr_ppo":
-    model = SRModel(obs_space, envs[0].action_space, device, args.mem, args.text, args.input, args.feature_learn)
+    model = SRModel(obs_space, envs[0].action_space, device, args.mem, args.text, args.input, args.feature_learn,obs_space_sampler=envs[0].observation_space)
 else:
     model = ACModel(obs_space, envs[0].action_space, args.mem, args.text)
 target = copy.deepcopy(model)
@@ -223,25 +223,19 @@ elif args.algo == "ppo":
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
     from algos.sr_a2c import SRAlgo
-    reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
+    #reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
-                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward)
+                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss)
 
 elif args.algo == "sr_ppo":
     from algos.sr_ppo import SRAlgo
-    reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
+    #reshape_reward = lambda o,a,r,d: -1 if r==0 else 10
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
                             args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
-                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward, args.clip_eps)
-
-    #reshape_reward = lambda o,a,r,d: -1 if r==0 else 1 
-    algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
-                            args.entropy_coef, args.sr_loss_coef, args.policy_loss_coef,args.recon_loss_coef,args.reward_loss_coef,args.norm_loss_coef,
-                            args.max_grad_norm, args.recurrence,
-                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss,reshape_reward, args.use_V_advantage)
+                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, args.clip_eps , preprocess_obss,None, args.use_V_advantage)
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 

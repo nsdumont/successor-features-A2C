@@ -12,7 +12,7 @@ class SRAlgo(BaseSRAlgo):
 
     def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
         lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, entropy_coef=0.01, sr_loss_coef=1, policy_loss_coef=1,recon_loss_coef=1,reward_loss_coef=1,norm_loss_coef=1,
-        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200,batch_size=300, preprocess_obss=None, reshape_reward=None, clip_eps=0.2):
+        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200,batch_size=300, clip_eps=0.2, preprocess_obss=None, reshape_reward=None,use_V_advantage=False):
  
         num_frames_per_proc = num_frames_per_proc or 200
 
@@ -27,6 +27,7 @@ class SRAlgo(BaseSRAlgo):
         self.feature_learn = feature_learn
         self.clip_eps = clip_eps
         self.batch_size=batch_size
+        self.use_V_advantage= use_V_advantage
         
         #params = [self.model.feature_in.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
         #self.feature_params = itertools.chain(*params)
@@ -104,14 +105,16 @@ class SRAlgo(BaseSRAlgo):
             elif self.feature_learn=="curiosity":
                 next_embedding, next_obs_pred, action_pred = predictions
                 forward_loss = F.mse_loss(next_obs_pred , next_embedding)
-                inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) # mse if continuous action
+                if self.model.continuous_action:
+                    inverse_loss = F.mse_loss(action_pred.reshape(-1),sb[:-1].action.float())
+                else:
+                    inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) # mse if continuous action
                 reconstruction_loss = forward_loss + inverse_loss 
 
 
             norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
             feature_loss = reconstruction_loss + self.norm_loss_coef*norm_loss 
             #reward_loss = F.mse_loss(reward, sb.reward )
-            sr_loss = F.smooth_l1_loss(successor, sb.successorn) #F.mse_loss(successor, sb.successorn)
             entropy = dist.entropy().mean()
             
             with torch.no_grad():
@@ -121,9 +124,33 @@ class SRAlgo(BaseSRAlgo):
 
             
             A_diff = F.mse_loss(SR_advanage_dot_R, sb.V_advantage)
-            #policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
-            policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
+            
+            if self.continuous_action:
+                pdf = torch.exp(-0.5*(sb.action.reshape(-1,1) - dist.mean).pow(2)/dist.stddev.pow(2))/(dist.stddev*2*np.pi)
 
+                ratio = pdf.reshape(-1)/torch.max(sb.log_prob, (1e-16)*torch.ones(sb.action.shape))
+
+            else:
+                ratio = torch.exp(dist.log_prob(sb.action) - sb.log_prob)
+
+            if self.use_V_advantage:
+                advantage =  sb.V_advantage
+            else:
+                advantage = SR_advanage_dot_R
+            
+            surr1 = ratio * advantage
+            surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * advantage
+            policy_loss = -torch.min(surr1, surr2).mean()
+
+            # sr_clipped = sb.successor + torch.clamp(successor - sb.successor, -self.clip_eps, self.clip_eps)
+            # surr1 = F.mse_loss(successor , sb.successorn)
+            # surr2 = F.mse_loss(sr_clipped , sb.successorn)
+            # sr_loss = torch.max(surr1, surr2)
+             
+            sr_loss = F.smooth_l1_loss(successor, sb.successorn) #F.mse_loss(successor, sb.successorn)
+
+            # if  torch.isnan(policy_loss) or torch.isinf(policy_loss):
+            #     policy_loss
             actor_loss = policy_loss - self.entropy_coef * entropy
         
             # Update batch values
@@ -191,6 +218,8 @@ class SRAlgo(BaseSRAlgo):
         update_loss.backward(retain_graph=False)
         torch.nn.utils.clip_grad_norm_(self.model.feature_in.parameters(), self.max_grad_norm)
         torch.nn.utils.clip_grad_norm_(self.model.feature_out.parameters(), self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
+
         self.feature_optimizer.step()
         
         

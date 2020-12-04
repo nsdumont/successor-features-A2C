@@ -109,7 +109,10 @@ class SRAlgo(BaseSRAlgo):
             elif self.feature_learn=="curiosity":
                 next_embedding, next_obs_pred, action_pred = predictions
                 forward_loss = F.mse_loss(next_obs_pred , next_embedding)
-                inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) # mse if continuous action
+                if self.model.continuous_action:
+                    inverse_loss = F.mse_loss(action_pred.reshape(-1),sb[:-1].action.float())
+                else:
+                    inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) # mse if continuous action
                 reconstruction_loss = forward_loss + inverse_loss 
 
 
