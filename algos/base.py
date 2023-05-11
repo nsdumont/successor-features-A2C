@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
 import torch
+import sys
+# from torch_ac.format import default_preprocess_obss
+# from torch_ac.utils import DictList, ParallelEnv
 
-from torch_ac.format import default_preprocess_obss
-from torch_ac.utils import DictList, ParallelEnv
+from utils import default_preprocess_obss, DictList, ParallelEnv
+
 
 class BaseAlgo(ABC):
     """The base class for RL algorithms."""
@@ -133,7 +136,8 @@ class BaseAlgo(ABC):
                     dist, value = self.acmodel(preprocessed_obs)
             action = dist.sample()
 
-            obs, reward, done, _ = self.env.step(action.cpu().numpy())
+            obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
+            done = tuple(a | b for a, b in zip(terminated, truncated))
 
             # Update experiences values
 

@@ -1,16 +1,21 @@
-from multiprocessing import Process, Pipe
-import gym
+import multiprocessing
+import gymnasium as gym
+
+try:
+    multiprocessing.set_start_method("fork", force=True)
+except RuntimeError:
+    pass
 
 def worker(conn, env):
     while True:
         cmd, data = conn.recv()
         if cmd == "step":
-            obs, reward, done, info = env.step(data)
-            if done:
-                obs = env.reset()
-            conn.send((obs, reward, done, info))
+            obs, reward, terminated, truncated, info = env.step(data)
+            if terminated or truncated:
+                obs, _ = env.reset()
+            conn.send((obs, reward, terminated, truncated, info))
         elif cmd == "reset":
-            obs = env.reset()
+            obs, _ = env.reset()
             conn.send(obs)
         else:
             raise NotImplementedError
@@ -27,9 +32,9 @@ class ParallelEnv(gym.Env):
 
         self.locals = []
         for env in self.envs[1:]:
-            local, remote = Pipe()
+            local, remote = multiprocessing.Pipe()
             self.locals.append(local)
-            p = Process(target=worker, args=(remote, env))
+            p = multiprocessing.Process(target=worker, args=(remote, env))
             p.daemon = True
             p.start()
             remote.close()
@@ -37,16 +42,16 @@ class ParallelEnv(gym.Env):
     def reset(self):
         for local in self.locals:
             local.send(("reset", None))
-        results = [self.envs[0].reset()] + [local.recv() for local in self.locals]
+        results = [self.envs[0].reset()[0]] + [local.recv() for local in self.locals]
         return results
 
     def step(self, actions):
         for local, action in zip(self.locals, actions[1:]):
             local.send(("step", action))
-        obs, reward, done, info = self.envs[0].step(actions[0])
-        if done:
-            obs = self.envs[0].reset()
-        results = zip(*[(obs, reward, done, info)] + [local.recv() for local in self.locals])
+        obs, reward, terminated, truncated, info = self.envs[0].step(actions[0])
+        if truncated or terminated:
+            obs, _ = self.envs[0].reset()
+        results = zip(*[(obs, reward,  terminated, truncated, info)] + [local.recv() for local in self.locals])
         return results
 
     def render(self):

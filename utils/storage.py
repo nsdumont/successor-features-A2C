@@ -66,4 +66,4 @@ def get_csv_logger(model_dir):
     csv_path = os.path.join(model_dir, "log.csv")
     utils.create_folders_if_necessary(csv_path)
     csv_file = open(csv_path, "a")
-    return csv_file, csv.writer(csv_file)
+    return csv_file, csv.writer(csv_file, delimiter=',', lineterminator='\n')

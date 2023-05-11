@@ -4,12 +4,12 @@ import numpy
 import torch
 import matplotlib.pyplot as plt
 import utils
-import gym
+import gymnasium as gym
 import yaml
 
-from gym_minigrid.wrappers import SSPWrapper
 
-#runfile('/home/ns2dumon/Documents/GitHub/successor-features-A2C/visualize_agent.py',args= ' --algo sr --env MiniGrid-Empty-6x6-v0 --model MiniGrid-Empty-6x6-v0_sr_seed1_20-09-02-19-35-44 --input flat --feature-learn curiosity', wdir ='/home/ns2dumon/Documents/GitHub/successor-features-A2C')
+
+#python visualize_agent.py --algo sr --env MiniGrid-Empty-6x6-v0 --model MiniGrid-Empty-6x6-v0_sr_seed1_23-05-11-17-12-46 --input image 
 
 # Parse arguments
 
@@ -61,6 +61,7 @@ print(f"Device: {device}\n")
 
 env = utils.make_env(args.env, seed=args.seed,env_args=args.env_args)
 if args.input =='ssp':
+    from minigrid.wrappers import SSPWrapper
     import nengo_ssp as ssp
     X,Y,_ = ssp.HexagonalBasis(10,10)
     d = len(X.v)

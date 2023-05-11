@@ -1,15 +1,7 @@
-import gym
-# delenvs = []
-# for env in gym.envs.registry.env_specs:
-#       if 'MiniGrid' in env:
-#           #print("Remove {} from registry".format(env))
-#           delenvs.append(env)
-# for env in delenvs:
-#     del gym.envs.registry.env_specs[env]
-import gym_minigrid
+import gymnasium as gym
 
 
-def make_env(env_key, seed=None, env_args={}):
-    env = gym.make(env_key, **env_args)
-    env.seed(seed)
+def make_env(env_key, seed=None, render_mode=None, env_args=None):
+    env = gym.make(env_key, render_mode=render_mode)
+    env.reset(seed=seed)
     return env

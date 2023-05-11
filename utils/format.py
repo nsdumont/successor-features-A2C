@@ -4,20 +4,22 @@ import numpy as np
 import re
 import torch
 import torch_ac
-import gym
-
+import gymnasium as gym
 
 import utils
 
+def default_preprocess_obss(obss, device=None):
+    return torch.tensor(obss, device=device)
 
 def get_obss_preprocessor(obs_space):
     # Check if obs_space is an image space
     if isinstance(obs_space, gym.spaces.Box):
-        obs_space = {"image": obs_space.shape}
+        obs_space = {"image": obs_space.shape, "text": 0}
 
         def preprocess_obss(obss, device=None):
             return torch_ac.DictList({
-                "image": preprocess_images(obss, device=device)
+                "image": preprocess_images(obss, device=device), 
+                "text": torch.zeros(len(obss))
                 })
 
     # Check if it is a MiniGrid observation space
@@ -27,8 +29,8 @@ def get_obss_preprocessor(obs_space):
         
             def preprocess_obss(obss, device=None):
                 return torch_ac.DictList({
-                    "image": preprocess_images([obs["image"] for obs in obss], device=device),
-                    "text": preprocess_images([obs["mission"] for obs in obss], device=device)
+                    "image": preprocess_images([obs[0]["image"] for obs in obss], device=device),
+                    "text": preprocess_images([obs[0]["mission"] for obs in obss], device=device)
                 })
         else:
             obs_space = {"image": obs_space.spaces["image"].shape, "text": (100,)}
