@@ -303,12 +303,12 @@ while num_frames < args.frames:
         txt_logger.info("Status saved")
 
 
-# import matplotlib.pyplot as plt
-# import seaborn as sns
-# import pandas as pd
-# data = pd.read_csv(model_dir + "/log.csv")
-# sns.lineplot(x="frames", y='return_mean', data=data)
-# plt.title('Return')
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+data = pd.read_csv(model_dir + "/log.csv")
+sns.lineplot(x="frames", y='return_mean', data=data)
+plt.title('Return')
 # plt.figure()
 # sns.lineplot(x="frames", y='entropy', data=data)
 # plt.title('Entropy')

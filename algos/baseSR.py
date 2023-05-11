@@ -172,6 +172,7 @@ class BaseSRAlgo(ABC):
             if self.continuous_action:
                 action = dist.sample().detach()
                 action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action)
+                torch.nan_to_num(action, nan=0.0, posinf=self.env.envs[0].max_action, neginf=self.env.envs[0].min_action)
             else:
                 action = dist.sample().detach()
             obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
