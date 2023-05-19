@@ -75,6 +75,8 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         # Initialize parameters correctly
         self.reward = nn.Linear(self.embedding_size, 1, bias=False)
         self.apply(init_params)
+        
+
 
  
 

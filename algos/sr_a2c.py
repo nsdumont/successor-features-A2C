@@ -25,8 +25,8 @@ class SRAlgo(BaseSRAlgo):
         self.batch_size=batch_size
         
     
-        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},
-                                                      {'params': self.model.feature_out.parameters()}],#{'params': self.model.actor.parameters()} ],
+        self.feature_optimizer = torch.optim.RMSprop(list(self.model.feature_in.parameters()) +
+                                                      list(self.model.feature_out.parameters()) ,#{'params': self.model.actor.parameters()} ],
                                                      lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
         self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
                                           lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
@@ -53,7 +53,8 @@ class SRAlgo(BaseSRAlgo):
         update_norm_loss = 0
         update_actor_loss = 0#torch.zeros(1, requires_grad=True, device=self.device)
         update_feature_loss = 0#torch.zeros(1, requires_grad=True, device=self.device)
-
+        update_reward_loss = 0
+        update_A_loss= 0
         # Initialize memory
 
         if self.model.use_memory:
@@ -92,11 +93,15 @@ class SRAlgo(BaseSRAlgo):
 
             norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
             feature_loss = self.recon_loss_coef*reconstruction_loss + self.norm_loss_coef*norm_loss 
+            # reward_loss = F.mse_loss(reward, sb.reward )
             sr_loss = F.mse_loss(successor, sb.successorn) 
             entropy = dist.entropy().mean()
             
+            
             SR_advanage_dot_R = self.model.reward(sb.SR_advantage).detach()
-            policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
+            A_diff = F.mse_loss(SR_advanage_dot_R, sb.V_advantage)
+            policy_loss = -(dist.log_prob(sb.action) * sb.V_advantage).mean()
+            #policy_loss = -(dist.log_prob(sb.action) * SR_advanage_dot_R).mean()
             actor_loss = policy_loss - self.entropy_coef * entropy
         
             # Update batch values
@@ -107,6 +112,8 @@ class SRAlgo(BaseSRAlgo):
             update_sr_loss += sr_loss
             update_actor_loss += actor_loss
             update_feature_loss += feature_loss
+            update_A_loss += A_diff.item()
+            # update_reward_loss += reward_loss
 
         # Update update values
         update_entropy /= self.recurrence
@@ -116,6 +123,7 @@ class SRAlgo(BaseSRAlgo):
         update_sr_loss /= self.recurrence
         update_actor_loss /= self.recurrence
         update_feature_loss /= self.recurrence
+        # update_reward_loss /= self.recurrence
 
         # Update all parts
         # Update SR
@@ -131,15 +139,16 @@ class SRAlgo(BaseSRAlgo):
         update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 for p in self.model.actor.parameters()) ** 0.5
         torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
         self.actor_optimizer.step()
+        
+        
          
         # Update feature embedding net
         self.feature_optimizer.zero_grad()
-        #update_loss = update_feature_loss + update_actor_loss
+        #update_loss = update_feature_loss + update_reward_loss
         update_feature_loss.backward(retain_graph=False)
         update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_in.parameters()) ** 0.5
         torch.nn.utils.clip_grad_norm_(self.model.feature_in.parameters(), self.max_grad_norm)
         torch.nn.utils.clip_grad_norm_(self.model.feature_out.parameters(), self.max_grad_norm)
-        torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
         self.feature_optimizer.step()
         
         
@@ -152,16 +161,15 @@ class SRAlgo(BaseSRAlgo):
         batch_state.text = torch.cat(batch_state_txt)
         batch_reward = torch.cat(batch_reward)
         _, _, _, _, _, reward, _ = self.model(batch_state) 
-        update_reward_loss = F.smooth_l1_loss(reward, batch_reward.reshape(reward.shape))
-
+        update_reward_loss = F.mse_loss(reward, batch_reward.reshape(reward.shape))
         self.reward_optimizer.zero_grad()
         update_reward_loss.backward(retain_graph=False)
         update_grad_norm_reward = sum(p.grad.data.norm(2) ** 2 for p in self.model.reward.parameters()) ** 0.5
         torch.nn.utils.clip_grad_norm_(self.model.reward.parameters(), self.max_grad_norm)
         self.reward_optimizer.step()
         
-        update_grad_norm = np.max([ update_grad_norm_reward.item(),
-                                   update_grad_norm_sr.item(),
+        
+        update_grad_norm = np.max([ update_grad_norm_sr.item(),update_grad_norm_reward.item(),
                                    update_grad_norm_actor.item(), 
                                    update_grad_norm_features.item()]) 
 
@@ -176,7 +184,8 @@ class SRAlgo(BaseSRAlgo):
             "norm_loss": update_norm_loss,
             "entropy": update_entropy,
             "policy_loss": update_policy_loss,
-            "grad_norm": update_grad_norm
+            "grad_norm": update_grad_norm,
+            "A_mse": update_A_loss
         }
         
         self.num_updates += 1

@@ -19,13 +19,13 @@ from algos.a2c import A2CAlgo
 from algos.ppo import PPOAlgo
 from models.model_SR import SRModel
 
-#python train.py --algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 --input image --feature-learn curiosity
+#python train.py --algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 --input image --feature-learn curiosity --lr_sr 0.01
 
 
 # Parse arguments
 parser = argparse.ArgumentParser()
 
-## General parameters
+# General parameters
 parser.add_argument("--algo", required=True,
                     help="algorithm to use: a2c | ppo | sr | sr-ppo (REQUIRED)")
 parser.add_argument("--env", required=True,
@@ -105,7 +105,7 @@ parser.add_argument("--recurrence", type=int, default=1,
 parser.add_argument("--text", action="store_true", default=False,
                     help="add a GRU to the model to handle text input")
 
-parser.add_argument("--env-args", type=yaml.load, default={},
+parser.add_argument("--env-args", type=yaml.load, default={'render_mode': 'rgb_array'},
                     help="")
 
 args = parser.parse_args()
@@ -115,9 +115,9 @@ args.mem = args.recurrence > 1
 
 
 args.lr_a = args.lr_a or args.lr
-args.lr_sr = args.lr_sr or args.lr
+args.lr_sr = args.lr_sr or 10*args.lr
 args.lr_f = args.lr_f or args.lr
-args.lr_r = args.lr_r or args.lr/100
+args.lr_r = args.lr_r or args.lr
 
 
 # Set run dir
@@ -153,10 +153,10 @@ if args.input =='ssp':
     from wrappers import SSPWrapper#, SSPWrapper2
 
     for i in range(args.procs):
-        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i, args.env_args), rng=np.random.RandomState(args.seed)))
+        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), rng=np.random.RandomState(args.seed)))
 else: # flat (won't work for minigrid envs but will for others) or image
     for i in range(args.procs):
-        envs.append(utils.make_env(args.env, args.seed + 10000 * i, None, args.env_args))
+        envs.append(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args))
 
 txt_logger.info("Environments loaded\n")
 
@@ -226,6 +226,7 @@ update = status["update"]
 start_time = time.time()
 first_line=num_frames==0
 
+
 while num_frames < args.frames:
     # Update model parameters
     update_start_time = time.time()
@@ -291,9 +292,9 @@ while num_frames < args.frames:
     if args.save_interval > 0 and update % args.save_interval == 0:
         if is_sr:
             status = {"num_frames": num_frames, "update": update,
-                  "model_state": model.state_dict(),
+                  "model_state": model.state_dict(),"reward_optimizer_state": algo.reward_optimizer.state_dict(),
                   "sr_optimizer_state": algo.sr_optimizer.state_dict(),# "actor_optimizer_state": algo.actor_optimizer.state_dict(),
-                  "reward_optimizer_state": algo.reward_optimizer.state_dict(), "feature_optimizer_state": algo.feature_optimizer.state_dict()}
+                   "feature_optimizer_state": algo.feature_optimizer.state_dict()}
         else:
             status = {"num_frames": num_frames, "update": update,
                   "model_state": model.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
@@ -308,7 +309,7 @@ import seaborn as sns
 import pandas as pd
 data = pd.read_csv(model_dir + "/log.csv")
 sns.lineplot(x="frames", y='return_mean', data=data)
-plt.title('Return')
+# plt.title('Return')
 # plt.figure()
 # sns.lineplot(x="frames", y='entropy', data=data)
 # plt.title('Entropy')
@@ -321,9 +322,46 @@ plt.title('Return')
 # plt.figure()
 # sns.lineplot(x="frames", y='feature_loss', data=data)
 # plt.title('Feature loss')
-# plt.figure()
-# sns.lineplot(x="frames", y='reward_loss', data=data)
-# plt.title('Reward loss')
+plt.figure()
+sns.lineplot(x="frames", y='reward_loss', data=data)
+plt.title('Reward loss')
 # plt.figure()
 # sns.lineplot(x="frames", y='grad_norm', data=data)
 # plt.title('Grad norm')
+
+
+# model.reward.weight
+
+# r_preds = []
+# rs = []
+# obs,_=envs[0].reset()
+# plt.figure()
+# plt.imshow(envs[0].render())
+# for i in range(20):
+#     preprocessed_obs = algo.preprocess_obss([obs], device=algo.device)
+#     dist, value, embedding, _, successor, r_pred, _ = model(preprocessed_obs)
+#     action = dist.sample().detach()
+#     obs, reward, terminated, truncated, _ = envs[0].step(action.cpu().numpy())
+#     r_preds.append(r_pred)
+#     rs.append(reward)
+#     plt.figure()
+#     plt.imshow(envs[0].render())
+    
+    
+    
+r_preds = []
+rs = []
+obs,_=envs[0].reset()
+for i in range(1000):
+    preprocessed_obs = algo.preprocess_obss([obs], device=algo.device)
+    dist, value, embedding, _, successor, r_pred, _ = model(preprocessed_obs)
+    action = dist.sample().detach()
+    obs, reward, terminated, truncated, _ = envs[0].step(action.cpu().numpy())
+    r_preds.append(r_pred.detach().cpu().numpy())
+    rs.append(reward)
+    if terminated or truncated:
+        obs,_=envs[0].reset()
+    
+idx = np.where([r>0 for r in rs])[0][0]
+print(rs[idx-5:idx+5])
+print(r_preds[idx-5:idx+5])

@@ -150,7 +150,7 @@ class BaseSRAlgo(ABC):
             Useful stats about the training process, including the average
             reward, policy loss, value loss, etc.
         """
-
+        reward = tuple([0]*self.num_procs)
         for i in range(self.num_frames_per_proc):
             # Do one agent-environment interaction
             
@@ -159,6 +159,8 @@ class BaseSRAlgo(ABC):
                               
 
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
+            self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
+                                 self.FloatTensor([reward])))
             
             with torch.no_grad():
                 if self.model.use_memory:
@@ -178,8 +180,7 @@ class BaseSRAlgo(ABC):
             obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
             done = tuple(a | b for a, b in zip(terminated, truncated))
 
-            self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
-                                 self.FloatTensor([reward])))
+            
 
             # Update experiences values
             self.obss[i] = self.obs
@@ -239,6 +240,7 @@ class BaseSRAlgo(ABC):
             self.obs = [o for o in self.model.scaler.transform(self.obs)]
 
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
+        
         with torch.no_grad():
             if self.model.use_memory:
                 _, next_value, _, _, next_successor, _, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) #target
@@ -249,15 +251,15 @@ class BaseSRAlgo(ABC):
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
             next_successor = self.target_successors[i+1] if i < self.num_frames_per_proc - 1 else next_successor
-            #next_value = self.target_values[i+1] if i < self.num_frames_per_proc - 1 else next_value
+            next_value = self.target_values[i+1] if i < self.num_frames_per_proc - 1 else next_value
             next_SR_advantage = self.SR_advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
-            # next_V_advantage = self.V_advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
+            next_V_advantage = self.V_advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
 
             SR_delta = self.target_embeddings[i] + (self.discount * next_successor * next_mask.reshape(-1,1)) - self.target_successors[i]
             self.SR_advantages[i] = SR_delta + (self.discount * self.gae_lambda * next_SR_advantage * next_mask.reshape(-1,1))
             
-            # V_delta = self.rewards[i] + self.discount * next_value * next_mask - self.target_values[i]
-            # self.V_advantages[i] = V_delta + self.discount * self.gae_lambda * next_V_advantage * next_mask
+            V_delta = self.rewards[i] + self.discount * next_value * next_mask - self.target_values[i]
+            self.V_advantages[i] = V_delta + self.discount * self.gae_lambda * next_V_advantage * next_mask
 
         # Define experiences:
         #   the whole experience is the concatenation of the experience
@@ -283,8 +285,8 @@ class BaseSRAlgo(ABC):
         exps.SR_advantage = self.SR_advantages.transpose(0, 1).reshape(-1,self.model.embedding_size)
         exps.successor = self.successors.transpose(0, 1).reshape(-1,self.model.embedding_size)
         exps.successorn = exps.successor + exps.SR_advantage
-        #exps.V_advantage = self.V_advantages.transpose(0, 1).reshape(-1)
-        #exps.returnn = exps.value + exps.V_advantage
+        exps.V_advantage = self.V_advantages.transpose(0, 1).reshape(-1)
+        exps.returnn = exps.value + exps.V_advantage
         exps.log_prob = self.log_probs.transpose(0, 1).reshape(-1)
 
         # Preprocess experiences
