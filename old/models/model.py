@@ -6,7 +6,7 @@ import torch_ac
 import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Discrete, Box
-from .submodels import ImageInput, FlatInput, SSPInput, IdentityInput, ContinuousActor, DiscreteActor
+from .submodels import ImageInput, FlatInput, IdentityInput, ContinuousActor, DiscreteActor
 
 
 # Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
@@ -35,9 +35,7 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
             self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text)
         elif input_type=="flat":
             self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text)
-        elif input_type=="ssp":
-            self.feature_in = SSPInput(obs_space,use_memory=use_memory,use_text=use_text)
-        elif input_type=="none":
+        elif input_type.startswith('ssp'):
             self.feature_in = IdentityInput(obs_space,use_memory=use_memory,use_text=use_text)
         else:
             raise ValueError("Incorrect input type name: {}".format(input_type))
@@ -80,7 +78,7 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
         return self.image_embedding_size
 
     def forward(self, obs, memory):
-        embedding, memory,_ = self.feature_in(obs, memory=memory)
+        embedding, memory = self.feature_in(obs, memory=memory)
 
         dist = self.actor(embedding)
 

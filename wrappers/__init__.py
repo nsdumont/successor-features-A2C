@@ -1,2 +1,11 @@
-from .sspspace import HexagonalSSPSpace
-from .wrappers import SSPWrapper
+from .ssp_wrapper import SSPEnvWrapper
+from .minigrid_ssp_xy_wrapper import SSPMiniGridXYWrapper
+from .minigrid_xy_wrapper import MiniGridXYWrapper
+from .minigrid_onehot_wrapper import MiniGridOneHotWrapper
+from .minigrid_view_wrapper import SSPMiniGridViewWrapper
+
+from .babyai_view_wrapper import SSPBabyAIViewWrapper
+
+from .miniworld_xy_wrapper import MiniWorldXYWrapper
+from .miniworld_onehot_wrapper import MiniWorldOneHotWrapper
+from .miniworld_ssp_xy_wrapper import SSPMiniWorldXYWrapper

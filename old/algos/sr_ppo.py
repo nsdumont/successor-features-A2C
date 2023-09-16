@@ -34,11 +34,11 @@ class SRPPOAlgo(BaseSRAlgo):
         
         #self.feature_optimizer = torch.optim.RMSprop(self.feature_params, lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
 
-        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},
-                                                      {'params': self.model.feature_out.parameters()} ],
+        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.feature_out.parameters()},
+                                                      {'params': self.model.actor.parameters()}],
                                                      lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
-        self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
-                                          lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
+        #self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+         #                                 lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
         
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
                                           lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
@@ -74,7 +74,7 @@ class SRPPOAlgo(BaseSRAlgo):
                 batch_feature_loss = 0
                 # Initialize memory
     
-                if self.model.use_memory:
+                if self.model.recurrent:
                     memory = exps.memory[inds]
     
                 for i in range(self.recurrence):
@@ -83,12 +83,12 @@ class SRPPOAlgo(BaseSRAlgo):
                     sb = exps[inds + i]
                      
                     # Compute loss
-                    if self.model.use_memory:
+                    if self.model.recurrent:
                         _, _, _, predictions, _, _, _,_ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
                     else:
                         _, _, _, predictions, _, _,_ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
                       
-                    if self.model.use_memory:
+                    if self.model.recurrent:
                         dist, value, embedding, _, successor, _,_, memory = self.model(sb.obs,memory= memory * sb.mask)
                     else:
                         dist, value, embedding, _, successor, _,_ = self.model(sb.obs)
@@ -104,28 +104,31 @@ class SRPPOAlgo(BaseSRAlgo):
                             inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) # mse if continuous action
                         reconstruction_loss = forward_loss + inverse_loss 
     
-                    if self.feature_learn != "none":
-                        norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
-                        feature_loss = reconstruction_loss + self.norm_loss_coef*norm_loss 
-                    else:
-                        reconstruction_loss = torch.Tensor(np.zeros(1))
-                        norm_loss = torch.Tensor(np.zeros(1))
-                        feature_loss = torch.Tensor(np.zeros(1))                
-
+                    norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
+                    feature_loss = reconstruction_loss + self.norm_loss_coef*norm_loss 
                     
                     
-                    sr_clipped = sb.successor + torch.clamp(successor - sb.successor, -self.clip_eps, self.clip_eps)
-                    surr1 = (successor - sb.successorn).pow(2)
-                    surr2 = (sr_clipped - sb.successorn).pow(2)
-                    sr_loss = torch.max(surr1, surr2).mean()
-                    # sr_loss = F.mse_loss(successor, sb.successorn) 
                     
+                    sr_loss = F.mse_loss(successor, sb.successorn).clamp(max=self.clip_eps)
+         
+                    # value_clipped = sb.value + torch.clamp(value - sb.value, -self.clip_eps, self.clip_eps)
+                    # surr1 = (value - sb.returnn).pow(2)
+                    # surr2 = (value_clipped - sb.returnn).pow(2)
+                    # value_loss = torch.max(surr1, surr2).mean()
+                    
+                    with torch.no_grad():
+                        _,_,_,_,_,_,r_vec,_ = self.target(sb.obs,memory= memory * sb.mask)
+                        SR_advanage_dot_R = torch.sum(r_vec * sb.SR_advantage, 1)
+    
     
                     entropy = dist.entropy().mean()
                     ratio = torch.exp(dist.log_prob(sb.action) - sb.log_prob)
-                    surr1 = ratio * sb.V_advantage
-                    surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * sb.V_advantage
-                    
+                    if self.use_V_advantage:
+                        surr1 = ratio * sb.V_advantage
+                        surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * sb.V_advantage
+                    else:
+                        surr1 = ratio * SR_advanage_dot_R
+                        surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * SR_advanage_dot_R
                     policy_loss = -torch.min(surr1, surr2).mean()
 
                     actor_loss = policy_loss - self.entropy_coef * entropy
@@ -141,7 +144,7 @@ class SRPPOAlgo(BaseSRAlgo):
     
                     # Update memories for next epoch
     
-                    if self.model.use_memory and i < self.recurrence - 1:
+                    if self.model.recurrent and i < self.recurrence - 1:
                         exps.memory[inds + i + 1] = memory.detach()
     
                 # Update batch values
@@ -162,25 +165,12 @@ class SRPPOAlgo(BaseSRAlgo):
                 torch.nn.utils.clip_grad_norm_(self.model.SR.parameters(), self.max_grad_norm)
                 self.sr_optimizer.step()
                 
-                # Update actor (policy loss + entropy)
-                self.actor_optimizer.zero_grad()
-                batch_actor_loss.backward(retain_graph=True)
-                update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 for p in self.model.actor.parameters()) ** 0.5
-                torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
-                self.actor_optimizer.step()
-
-                 
-                # Update feature embedding net
-                if self.feature_learn != "none":
-                    self.feature_optimizer.zero_grad()
-                    #update_loss = update_feature_loss + update_reward_loss
-                    batch_feature_loss.backward(retain_graph=True)
-                    update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_in.parameters()) ** 0.5
-                    torch.nn.utils.clip_grad_norm_(self.model.feature_in.parameters(), self.max_grad_norm)
-                    torch.nn.utils.clip_grad_norm_(self.model.feature_out.parameters(), self.max_grad_norm)
-                    self.feature_optimizer.step()
-                else:
-                    update_grad_norm_features = torch.Tensor(np.zeros(1))
+                self.model.zero_grad()
+                update_loss = self.recon_loss_coef*batch_feature_loss + batch_actor_loss
+                update_loss.backward(retain_graph=True)
+                torch.nn.utils.clip_grad_norm_(self.model.feature_in.parameters(), self.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.model.feature_out.parameters(), self.max_grad_norm)
+                self.feature_optimizer.step()
                 
                 # reward leanring: not on policy so do random samples
                 transitions = self.replay_memory.sample(np.min([self.batch_size,self.replay_memory.__len__()]))
@@ -189,7 +179,7 @@ class SRPPOAlgo(BaseSRAlgo):
                 batch_state.image =  torch.cat(batch_state_img)
                 batch_state.text = torch.cat(batch_state_txt)
                 batch_reward = torch.cat(batch_reward)
-                if self.model.use_memory:
+                if self.model.recurrent:
                     _, _, _, _, _, reward, _,_ = self.model(batch_state) # issue with memory here
                 else:
                     _, _, _, _, _, reward,_ = self.model(batch_state)
@@ -201,9 +191,8 @@ class SRPPOAlgo(BaseSRAlgo):
                 torch.nn.utils.clip_grad_norm_(self.model.reward.parameters(), self.max_grad_norm)
                 self.reward_optimizer.step()
                 
-                grad_norm = np.max([ update_grad_norm_sr.item(),update_grad_norm_reward.item(),
-                           update_grad_norm_actor.item(), 
-                           update_grad_norm_features.item()]) 
+                grad_norm = np.max([ update_grad_norm_reward.item(),update_grad_norm_sr.item()]) #update_grad_norm_sr.item()
+
     
                 # Update log values
     

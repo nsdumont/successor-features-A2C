@@ -5,7 +5,10 @@ import re
 import torch
 import torch_ac
 import gymnasium as gym
-
+import sys,os
+sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
+from spaces import SSPBox, SSPDiscrete, SSPSequence, SSPDict
+   
 import utils
 
 def default_preprocess_obss(obss, device=None):
@@ -13,12 +16,12 @@ def default_preprocess_obss(obss, device=None):
 
 def get_obss_preprocessor(obs_space):
     # Check if obs_space is an image space
-    if isinstance(obs_space, gym.spaces.Box):
+    if isinstance(obs_space, gym.spaces.Box) or isinstance(obs_space, SSPBox) or isinstance(obs_space, SSPDiscrete) or isinstance(obs_space, SSPSequence):
         obs_space = {"image": obs_space.shape, "text": 0}
 
         def preprocess_obss(obss, device=None):
             return torch_ac.DictList({
-                "image": preprocess_images(obss, device=device), 
+                "image":preprocess_images([obs.squeeze() for obs in obss], device=device),
                 "text": torch.zeros(len(obss))
                 })
 

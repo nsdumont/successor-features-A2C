@@ -1,5 +1,4 @@
-#import nni
-
+import importlib
 import argparse
 import time
 import datetime
@@ -8,6 +7,11 @@ import utils
 import copy
 import numpy as np
 import yaml
+
+# Possible envs
+import minigrid
+import miniworld
+import gym_maze
 
 import tensorboardX
 import sys
@@ -19,9 +23,22 @@ from algos.a2c import A2CAlgo
 from algos.ppo import PPOAlgo
 from models.model_SR import SRModel
 
-#python train.py --algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 --input image --feature-learn curiosity --lr_sr 0.01
+#python train.py --algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 -a2c --lr_sr 0.01
 
 
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper ssp-xy --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper one-hot --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --input ssp --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper ssp-xy --input none --plot True --feature-learn none', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --input ssp --plot True --feature-learn combined', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper none --input image --plot True --feature-learn curiosity', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 --input ssp-xy --feature-learn none --lr_sr 0.01 --ssp-h 1', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniWorld-TMazeLeft-v0 --frames 50000 --input ssp-xy --feature-learn none --lr_sr 0.01 --ssp-h 1 --procs 1', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env maze-sample-5x5 --frames 30000 --input flat --procs 5 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 # Parse arguments
 parser = argparse.ArgumentParser()
 
@@ -32,6 +49,15 @@ parser.add_argument("--env", required=True,
                     help="name of the environment to train on (REQUIRED)")
 parser.add_argument("--model", default=None,
                     help="name of the model (default: {ENV}_{ALGO}_{TIME})")
+parser.add_argument("--input", type=str, default="auto",
+                    help="format of input:  auto | image | flat | ssp | none (default: auto)")
+parser.add_argument("--wrapper", type=str, default="none",
+                    help="format of input:  none | ssp-xy | ssp-auto | one-hot | FullyObsWrapper | RGBImgObsWrapper | OneHotPartialObsWrapper | DirectionObsWrapper (default: non)")
+parser.add_argument("--feature-learn", type=str, default="curiosity",
+                    help="method for feature learning:  curiosity | reconstruction | combined | none (default: curiosity)")
+
+
+
 parser.add_argument("--seed", type=int, default=1,
                     help="random seed (default: 1)")
 parser.add_argument("--log-interval", type=int, default=1,
@@ -42,8 +68,10 @@ parser.add_argument("--procs", type=int, default=5,
                     help="number of processes (default: 5)")
 parser.add_argument("--frames", type=int, default=10**7,
                     help="number of frames of training (default: 1e7)")
-parser.add_argument("--load-optimizer-state", type=int, default=1,
+parser.add_argument("--load-optimizer-state", type=bool, default=True,
                     help="If True and a logs for this model (defined by model arg) exist then load the optimizer info from last run. Otherwise do not.")
+parser.add_argument("--plot", type=bool, default=False,
+                    help="If True, plot mean return after training")
 
 parser.add_argument("--target-update", type=int, default=10,
                     help="how often to update the target network") # right now only set up for sr algo
@@ -75,6 +103,8 @@ parser.add_argument("--gae-lambda", type=float, default=0.95,
                     help="lambda coefficient in GAE formula (default: 0.95, 1 means no gae)")
 parser.add_argument("--entropy-coef", type=float, default=0.0005,
                     help="entropy term coefficient (default: 0.0005)")
+parser.add_argument("--entropy-decay", type=float, default=1,
+                    help="entropy decay coefficient (default: 0.99)")
 parser.add_argument("--memory-cap", type=int, default=100000,
                     help=" (default: 100000)")
 
@@ -84,11 +114,11 @@ parser.add_argument("--recon-loss-coef", type=float, default=0.1,
 parser.add_argument("--norm-loss-coef", type=float, default=1,
                     help="norm loss term coefficient (default: 1)")
 
-parser.add_argument("--input", type=str, default="image",
-                    help="format of input:  image | flat | ssp (default: image)")
-parser.add_argument("--feature-learn", type=str, default="curiosity",
-                    help="method for feature learning:  curiosity | reconstruction  (default: curiosity)")
 
+parser.add_argument("--ssp-dim", type=int, default=151,
+                    help="Dim of spp (default: 151)")
+parser.add_argument("--ssp-h", type=float, default=1.,
+                    help="Length scale of spp representation (default: 1)")
 
 parser.add_argument("--value-loss-coef", type=float, default=0.5,
                     help="value loss term coefficient (default: 0.5)")
@@ -115,10 +145,12 @@ args.mem = args.recurrence > 1
 
 
 args.lr_a = args.lr_a or args.lr
-args.lr_sr = args.lr_sr or 10*args.lr
+args.lr_sr = args.lr_sr or args.lr
 args.lr_f = args.lr_f or args.lr
 args.lr_r = args.lr_r or args.lr
 
+if args.input[:3]=='ssp':
+    args.feature_learn = 'none'
 
 # Set run dir
 
@@ -149,15 +181,67 @@ txt_logger.info(f"Device: {device}\n")
 
 # Load environments
 envs = []
-if args.input =='ssp':
-    from wrappers import SSPWrapper#, SSPWrapper2
-
-    for i in range(args.procs):
-        envs.append(SSPWrapper( utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), rng=np.random.RandomState(args.seed)))
-else: # flat (won't work for minigrid envs but will for others) or image
+if args.wrapper=='none':
     for i in range(args.procs):
         envs.append(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args))
+elif args.wrapper =='ssp-auto':
+    from wrappers import SSPEnvWrapper
+    for i in range(args.procs):
+        envs.append( SSPEnvWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+                            auto_convert_obs_space = True,auto_convert_action_space=False, shape_out = args.ssp_dim, length_scale=args.ssp_h,
+                            decoder_method = 'from-set'))
+elif (args.env[:8]=='MiniGrid') or (args.env[:6]=='BabyAI'):
+    if (args.wrapper =='xy'):
+        from wrappers import MiniGridXYWrapper
+        for i in range(args.procs):
+            envs.append( MiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
+    elif (args.wrapper =='one-hot'):
+        from wrappers import MiniGridOneHotWrapper
+        for i in range(args.procs):
+            envs.append( MiniGridOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
+    elif (args.wrapper =='ssp-xy'):
+        from wrappers import SSPMiniGridXYWrapper
+        for i in range(args.procs):
+            envs.append( SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+                                 shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'))
+    elif(args.wrapper =='ssp-view'):
+        from wrappers import SSPMiniGridViewWrapper
+        for i in range(args.procs):
+            envs.append( SSPMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+                                 shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )    
+    elif(args.wrapper =='ssp-lang'):
+         from wrappers import SSPBabyAIViewWrapper
+         for i in range(args.procs):
+             envs.append( SSPBabyAIViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+                                  shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )  
+    else:
+        exec(f"from minigrid.wrappers import {args.wrapper} as wrapper")
+        for i in range(args.procs):
+            envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
+elif (args.env[:9]=='MiniWorld'): 
+    if (args.wrapper =='ssp-xy'):
+        from wrappers import SSPMiniWorldXYWrapper
+        for i in range(args.procs):
+            envs.append( SSPMiniWorldXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+                                 shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'))
+    elif (args.wrapper =='xy'):
+        from wrappers import MiniWorldXYWrapper
+        for i in range(args.procs):
+            envs.append( MiniWorldXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))  
+    elif (args.wrapper =='one-hot'):
+        from wrappers import MiniWorldOneHotWrapper
+        for i in range(args.procs):
+            envs.append( MiniWorldOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))  
+    else:
+        exec(f"from miniworld.wrappers import {args.wrapper} as wrapper")
+        for i in range(args.procs):
+            envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
 
+if args.input =='auto':
+    if (type(envs[0].observation_space['image'].shape) is tuple) and len(envs[0].observation_space['image'].shape)==3:
+        args.input = 'image'
+    else:
+        args.input = 'flat'
 txt_logger.info("Environments loaded\n")
 
 # Load training status
@@ -177,9 +261,9 @@ txt_logger.info("Observations preprocessor loaded")
 # Load model
 is_sr = (args.algo == "sr") or (args.algo == "sr-ppo")
 if is_sr:
-    model = SRModel(obs_space, envs[0].action_space, device, args.mem, args.text, args.input, args.feature_learn,obs_space_sampler=envs[0].observation_space)
+    model = SRModel(obs_space, envs[0].action_space, args.mem, args.text, args.input, args.feature_learn, obs_space_sampler=envs[0].observation_space)
 else:
-    model = ACModel(obs_space, envs[0].action_space, args.mem, args.text)
+    model = ACModel(obs_space, envs[0].action_space, args.mem, args.text, args.input, obs_space_sampler=envs[0].observation_space)
 target = copy.deepcopy(model)
 if "model_state" in status:
     model.load_state_dict(status["model_state"])
@@ -194,30 +278,40 @@ txt_logger.info("{}\n".format(model))
 #reshape_reward = lambda o,a,r,d: -0.1 if r==0 else 10
 if args.algo == "a2c":
     algo = A2CAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
-                            args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
+                            args.entropy_coef,args.entropy_decay, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, preprocess_obss)
 elif args.algo == "ppo":
     algo = PPOAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
-                            args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
+                            args.entropy_coef,args.entropy_decay, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                             args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
 elif args.algo == "sr":
     from algos.sr_a2c import SRAlgo
     algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
-                            args.entropy_coef,args.recon_loss_coef,args.norm_loss_coef,
+                            args.entropy_coef,args.entropy_decay, args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss)
 
 elif args.algo == "sr-ppo":
     from algos.sr_ppo import SRPPOAlgo
     algo = SRPPOAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
-                            args.entropy_coef,args.recon_loss_coef,args.norm_loss_coef,
+                            args.entropy_coef,args.entropy_decay, args.norm_loss_coef,
                             args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, args.memory_cap, args.epochs, args.batch_size, args.clip_eps , preprocess_obss,None)
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
-if ("optimizer_state" in status) and args.load_optimizer_state:
-    algo.optimizer.load_state_dict(status["optimizer_state"])
+if is_sr:
+    if ("sr_optimizer_state" in status) and args.load_optimizer_state:
+        algo.sr_optimizer.load_state_dict(status["sr_optimizer_state"])
+    if ("reward_optimizer_state" in status) and args.load_optimizer_state:
+        algo.reward_optimizer.load_state_dict(status["reward_optimizer_state"])
+    if ("actor_optimizer_state" in status) and args.load_optimizer_state:
+        algo.actor_optimizer.load_state_dict(status["actor_optimizer_state"])
+    if ("feature_optimizer_state" in status) and args.load_optimizer_state:
+        algo.feature_optimizer.load_state_dict(status["feature_optimizer_state"])
+else:
+    if ("optimizer_state" in status) and args.load_optimizer_state:
+        algo.optimizer.load_state_dict(status["optimizer_state"])
 txt_logger.info("Optimizer loaded\n")
 
 # Train model
@@ -262,9 +356,6 @@ while num_frames < args.frames:
             data += [logs["entropy"],  logs["policy_loss"], logs["sr_loss"],
                      logs["feature_loss"], logs["reward_loss"], logs["grad_norm"]]
     
-           # txt_logger.info(
-            #    "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | srL {:.3f} | reconL {:.3f} | rL {:.3f} | ∇ {:.3f}"
-             #   .format(*data))
             txt_logger.info("Frames {}, Mean reward {:.3f}, Policy loss {:.3f}, SR loss {:.3f}, Reward loss {:.3f}, Feature loss {:.3f}".format(num_frames, rreturn_per_episode['mean'], logs["policy_loss"], logs["sr_loss"],logs["reward_loss"],logs["feature_loss"]))
         else:
             header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
@@ -290,26 +381,35 @@ while num_frames < args.frames:
     # Save status
 
     if args.save_interval > 0 and update % args.save_interval == 0:
-        if is_sr:
+        if is_sr and args.feature_learn!='combined':
             status = {"num_frames": num_frames, "update": update,
-                  "model_state": model.state_dict(),"reward_optimizer_state": algo.reward_optimizer.state_dict(),
-                  "sr_optimizer_state": algo.sr_optimizer.state_dict(),# "actor_optimizer_state": algo.actor_optimizer.state_dict(),
-                   "feature_optimizer_state": algo.feature_optimizer.state_dict()}
+                  "model_state": model.state_dict(),"target_state": target.state_dict(),
+                  "reward_optimizer_state": algo.reward_optimizer.state_dict(),
+                  "sr_optimizer_state": algo.sr_optimizer.state_dict(), "actor_optimizer_state": algo.actor_optimizer.state_dict()}
+            if (args.feature_learn!="none"):
+                  status["feature_optimizer_state"] = algo.feature_optimizer.state_dict()
         else:
             status = {"num_frames": num_frames, "update": update,
-                  "model_state": model.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
+                  "model_state": model.state_dict(), 
+                  "optimizer_state": algo.optimizer.state_dict()}
+            
         if hasattr(preprocess_obss, "vocab"):
             status["vocab"] = preprocess_obss.vocab.vocab
         utils.save_status(status, model_dir)
         txt_logger.info("Status saved")
 
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-data = pd.read_csv(model_dir + "/log.csv")
-sns.lineplot(x="frames", y='return_mean', data=data)
-# plt.title('Return')
+if args.plot:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+    data = pd.read_csv(model_dir + "/log.csv")
+    data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+    sns.lineplot(x="frames", y='return_mean', label="Return", data=data)
+    sns.lineplot(x="frames",y="avg_return",
+                  label="Moving Avg",data=data)
+    plt.xlabel("Frames observed", size=14)
+    plt.ylabel("Return", size=14)
+    plt.title('Return')
 # plt.figure()
 # sns.lineplot(x="frames", y='entropy', data=data)
 # plt.title('Entropy')
@@ -322,9 +422,9 @@ sns.lineplot(x="frames", y='return_mean', data=data)
 # plt.figure()
 # sns.lineplot(x="frames", y='feature_loss', data=data)
 # plt.title('Feature loss')
-plt.figure()
-sns.lineplot(x="frames", y='reward_loss', data=data)
-plt.title('Reward loss')
+# plt.figure()
+# sns.lineplot(x="frames", y='reward_loss', data=data)
+# plt.title('Reward loss')
 # plt.figure()
 # sns.lineplot(x="frames", y='grad_norm', data=data)
 # plt.title('Grad norm')
@@ -349,19 +449,19 @@ plt.title('Reward loss')
     
     
     
-r_preds = []
-rs = []
-obs,_=envs[0].reset()
-for i in range(1000):
-    preprocessed_obs = algo.preprocess_obss([obs], device=algo.device)
-    dist, value, embedding, _, successor, r_pred, _ = model(preprocessed_obs)
-    action = dist.sample().detach()
-    obs, reward, terminated, truncated, _ = envs[0].step(action.cpu().numpy())
-    r_preds.append(r_pred.detach().cpu().numpy())
-    rs.append(reward)
-    if terminated or truncated:
-        obs,_=envs[0].reset()
+# r_preds = []
+# rs = []
+# obs,_=envs[0].reset()
+# for i in range(1000):
+#     preprocessed_obs = algo.preprocess_obss([obs], device=algo.device)
+#     dist, value, embedding, _, successor, r_pred, _ = model(preprocessed_obs)
+#     action = dist.sample().detach()
+#     obs, reward, terminated, truncated, _ = envs[0].step(action.cpu().numpy())
+#     r_preds.append(r_pred.detach().cpu().numpy())
+#     rs.append(reward)
+#     if terminated or truncated:
+#         obs,_=envs[0].reset()
     
-idx = np.where([r>0 for r in rs])[0][0]
-print(rs[idx-5:idx+5])
-print(r_preds[idx-5:idx+5])
+# idx = np.where([r>0 for r in rs])[0][0]
+# print(rs[idx-5:idx+5])
+# print(r_preds[idx-5:idx+5])

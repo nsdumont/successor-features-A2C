@@ -159,7 +159,8 @@ class BaseSRAlgo(ABC):
                               
 
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
-        
+            self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
+                                 self.FloatTensor([reward])))
             
             with torch.no_grad():
                 if self.model.use_memory:
@@ -173,17 +174,15 @@ class BaseSRAlgo(ABC):
             if self.continuous_action:
                 action = dist.sample().detach()
                 action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action)
-                torch.nan_to_num(action, nan=torch.Tensor(self.env.envs[0].action_space.sample()), posinf=self.env.envs[0].max_action, neginf=self.env.envs[0].min_action)
+                torch.nan_to_num(action, nan=0.0, posinf=self.env.envs[0].max_action, neginf=self.env.envs[0].min_action)
             else:
                 action = dist.sample().detach()
             obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
             done = tuple(a | b for a, b in zip(terminated, truncated))
 
-
             
+
             # Update experiences values
-            self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
-                                 self.FloatTensor([reward])))
             self.obss[i] = self.obs
             self.obs = obs 
             if self.model.use_memory:
@@ -207,7 +206,6 @@ class BaseSRAlgo(ABC):
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
             self.log_probs[i] = dist.log_prob(action).squeeze()
-
 
 ##TODO:
     #for continuous actions need to collect mean and var as well so that they can be used in ppo ratio

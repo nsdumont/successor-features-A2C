@@ -10,7 +10,7 @@ from utils import default_preprocess_obss, DictList, ParallelEnv
 class BaseAlgo(ABC):
     """The base class for RL algorithms."""
 
-    def __init__(self, envs, acmodel, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
+    def __init__(self, envs, model, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,entropy_decay,
                  value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward):
         """
         Initializes a `BaseAlgo` instance.
@@ -19,7 +19,7 @@ class BaseAlgo(ABC):
         ----------
         envs : list
             a list of environments that will be run in parallel
-        acmodel : torch.Module
+        model : torch.Module
             the model
         num_frames_per_proc : int
             the number of frames collected by every process for an update
@@ -48,28 +48,30 @@ class BaseAlgo(ABC):
 
         # Store parameters
         self.env = ParallelEnv(envs)
-        self.acmodel = acmodel
+        self.model = model
         self.device = device
         self.num_frames_per_proc = num_frames_per_proc
         self.discount = discount
         self.lr = lr
         self.gae_lambda = gae_lambda
         self.entropy_coef = entropy_coef
+        self.entropy_decay=entropy_decay
         self.value_loss_coef = value_loss_coef
         self.max_grad_norm = max_grad_norm
         self.recurrence = recurrence
         self.preprocess_obss = preprocess_obss or default_preprocess_obss
         self.reshape_reward = reshape_reward
+        self.continuous_action = model.continuous_action
 
         # Control parameters
 
-        assert self.acmodel.recurrent or self.recurrence == 1
+        assert self.model.recurrent or self.recurrence == 1
         assert self.num_frames_per_proc % self.recurrence == 0
 
-        # Configure acmodel
+        # Configure model
 
-        self.acmodel.to(self.device)
-        self.acmodel.train()
+        self.model.to(self.device)
+        self.model.train()
 
         # Store helpers values
 
@@ -82,12 +84,15 @@ class BaseAlgo(ABC):
 
         self.obs = self.env.reset()
         self.obss = [None]*(shape[0])
-        if self.acmodel.recurrent:
-            self.memory = torch.zeros(shape[1], self.acmodel.memory_size, device=self.device)
-            self.memories = torch.zeros(*shape, self.acmodel.memory_size, device=self.device)
+        if self.model.recurrent:
+            self.memory = torch.zeros(shape[1], self.model.memory_size, device=self.device)
+            self.memories = torch.zeros(*shape, self.model.memory_size, device=self.device)
         self.mask = torch.ones(shape[1], device=self.device)
         self.masks = torch.zeros(*shape, device=self.device)
-        self.actions = torch.zeros(*shape, device=self.device, dtype=torch.int)
+        if self.continuous_action:
+            self.actions = torch.zeros(self.num_frames_per_proc, self.num_procs, self.model.n_actions, device=self.device)
+        else:
+            self.actions = torch.zeros(*shape, device=self.device, dtype=torch.int)
         self.values = torch.zeros(*shape, device=self.device)
         self.rewards = torch.zeros(*shape, device=self.device)
         self.advantages = torch.zeros(*shape, device=self.device)
@@ -127,14 +132,23 @@ class BaseAlgo(ABC):
 
         for i in range(self.num_frames_per_proc):
             # Do one agent-environment interaction
+            
+            if self.continuous_action:
+                self.obs = [o for o in self.model.scaler.transform(self.obs)]
 
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
             with torch.no_grad():
-                if self.acmodel.recurrent:
-                    dist, value, memory = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
+                if self.model.recurrent:
+                    dist, value, memory = self.model(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
                 else:
-                    dist, value = self.acmodel(preprocessed_obs)
-            action = dist.sample()
+                    dist, value = self.model(preprocessed_obs)
+            
+            if self.continuous_action:
+                action = dist.sample().detach()
+                action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action)
+                torch.nan_to_num(action, nan=torch.Tensor(self.env.envs[0].action_space.sample()), posinf=self.env.envs[0].max_action, neginf=self.env.envs[0].min_action)
+            else:
+                action = dist.sample().detach()
 
             obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
             done = tuple(a | b for a, b in zip(terminated, truncated))
@@ -143,7 +157,7 @@ class BaseAlgo(ABC):
 
             self.obss[i] = self.obs
             self.obs = obs
-            if self.acmodel.recurrent:
+            if self.model.recurrent:
                 self.memories[i] = self.memory
                 self.memory = memory
             self.masks[i] = self.mask
@@ -157,7 +171,7 @@ class BaseAlgo(ABC):
                 ], device=self.device)
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
-            self.log_probs[i] = dist.log_prob(action)
+            self.log_probs[i] = dist.log_prob(action).squeeze()
 
             # Update log values
 
@@ -177,13 +191,22 @@ class BaseAlgo(ABC):
             self.log_episode_num_frames *= self.mask
 
         # Add advantage and return to experiences
+        
+        if self.continuous_action:
+            # asuming flat observations for continuous action case:
+                # this is true for the Mountain Cart example but may not be in general
+                # Ideally the continuous action code should be modifed to handle flat or image input
+                # And the use of a scaler should be an option to train.py
+                # And either use checks here to do the following
+                # or create a wrapper that does the scaling and set it up in train.py
+            self.obs = [o for o in self.model.scaler.transform(self.obs)]
 
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
-            if self.acmodel.recurrent:
-                _, next_value, _ = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
+            if self.model.recurrent:
+                _, next_value, _ = self.model(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
             else:
-                _, next_value = self.acmodel(preprocessed_obs)
+                _, next_value = self.model(preprocessed_obs)
 
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
@@ -205,7 +228,7 @@ class BaseAlgo(ABC):
         exps.obs = [self.obss[i][j]
                     for j in range(self.num_procs)
                     for i in range(self.num_frames_per_proc)]
-        if self.acmodel.recurrent:
+        if self.model.recurrent:
             # T x P x D -> P x T x D -> (P * T) x D
             exps.memory = self.memories.transpose(0, 1).reshape(-1, *self.memories.shape[2:])
             # T x P -> P x T -> (P * T) x 1
