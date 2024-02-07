@@ -1,17 +1,18 @@
 from abc import ABC, abstractmethod
 import torch
-import sys
+import numpy as np
 # from torch_ac.format import default_preprocess_obss
 # from torch_ac.utils import DictList, ParallelEnv
 
 from utils import default_preprocess_obss, DictList, ParallelEnv
+# from algos.blr import BayesianLinearRegression 
 
 
 class BaseAlgo(ABC):
     """The base class for RL algorithms."""
 
     def __init__(self, envs, model, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,entropy_decay,
-                 value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward):
+                 value_loss_coef, dissim_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward):
         """
         Initializes a `BaseAlgo` instance.
 
@@ -108,6 +109,12 @@ class BaseAlgo(ABC):
         self.log_return = [0] * self.num_procs
         self.log_reshaped_return = [0] * self.num_procs
         self.log_num_frames = [0] * self.num_procs
+        
+        self.dissim_coef=dissim_coef
+        
+        # self.use_blr=use_blr
+        # if use_blr:
+        #     self.blr = BayesianLinearRegression(envs[0].observation_space['image'].shape_out)
 
     def collect_experiences(self):
         """Collects rollouts and computes advantages.
@@ -208,12 +215,21 @@ class BaseAlgo(ABC):
             else:
                 _, next_value = self.model(preprocessed_obs)
 
+        if self.dissim_coef != 0:
+            vec_obs = np.stack([np.stack([self.obss[i][j]['image']
+                        for j in range(self.num_procs) ]) for i in range(self.num_frames_per_proc)])
+            mu=vec_obs.sum(axis=(0,1))
+            mu /= np.linalg.norm(mu)
+            sims = torch.from_numpy((vec_obs @ mu)**2).to(self.device)
+            self.intrinsic_rewards = self.dissim_coef*(1-sims)
+        else:
+            self.intrinsic_rewards = torch.zeros(self.rewards.shape, device=self.device)
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
             next_value = self.values[i+1] if i < self.num_frames_per_proc - 1 else next_value
             next_advantage = self.advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
 
-            delta = self.rewards[i] + self.discount * next_value * next_mask - self.values[i]
+            delta = self.intrinsic_rewards[i] + self.rewards[i] + self.discount * next_value * next_mask - self.values[i]
             self.advantages[i] = delta + self.discount * self.gae_lambda * next_advantage * next_mask
 
         # Define experiences:
@@ -244,7 +260,11 @@ class BaseAlgo(ABC):
         # Preprocess experiences
 
         exps.obs = self.preprocess_obss(exps.obs, device=self.device)
-
+        
+        # mu = exps.obs.image.sum(axis=0)
+        # # mu = mu/torch.linalg.norm(mu)
+        # sims = (exps.obs.image @ mu)**2
+        # exps.sims = sims/sims.sum()
         # Log some values
 
         keep = max(self.log_done_counter, self.num_procs)

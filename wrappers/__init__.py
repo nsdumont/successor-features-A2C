@@ -9,3 +9,5 @@ from .babyai_view_wrapper import SSPBabyAIViewWrapper
 from .miniworld_xy_wrapper import MiniWorldXYWrapper
 from .miniworld_onehot_wrapper import MiniWorldOneHotWrapper
 from .miniworld_ssp_xy_wrapper import SSPMiniWorldXYWrapper
+
+from .ssp_action_wrapper import SSPMiniActionWrapper

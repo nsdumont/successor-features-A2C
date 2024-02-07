@@ -37,6 +37,7 @@ class SSPMiniWorldXYWrapper(gym.ObservationWrapper):
                                                            self.env.unwrapped.agent.pos[2],
                                                            ]]))
         return ssp_obs.reshape(-1)
-        
+    
+    
 
 

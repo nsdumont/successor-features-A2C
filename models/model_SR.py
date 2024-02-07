@@ -7,8 +7,11 @@ import numpy as np
 import gymnasium as gym
 from gymnasium.spaces import Discrete, Box
 
-from .submodels import ImageInput, FlatInput, SSPInput,  IdentityInput, ContinuousActor, DiscreteActor
+from .submodels import ImageInput, FlatInput, SSPInput,  IdentityInput, ContinuousActor, DiscreteActor, SPActor
 from .submodels import ImageReconstruction, FlatReconstruction, Curiosity, IdentityOutput
+import sys,os
+sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
+from spaces import SSPBox, SSPDiscrete
 
 # Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
 def init_params(m):
@@ -73,10 +76,15 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
             scaler = sklearn.preprocessing.StandardScaler()
             scaler.fit(state_space_samples)
             self.scaler = scaler
-        else:
+        elif type(action_space) == Discrete:
             self.n_actions = action_space.n
             self.actor = DiscreteActor(self.embedding_size,self.n_actions)
             self.continuous_action = False
+        elif type(action_space) == SSPDiscrete:
+            self.n_actions = action_space.shape_out
+            self.actor = SPActor(self.embedding_size,self.n_actions,action_space)
+            self.continuous_action = False
+
             
         if feature_learn=="reconstruction" and input_type=="image":
             self.feature_out = ImageReconstruction()

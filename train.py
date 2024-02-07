@@ -103,6 +103,8 @@ parser.add_argument("--gae-lambda", type=float, default=0.95,
                     help="lambda coefficient in GAE formula (default: 0.95, 1 means no gae)")
 parser.add_argument("--entropy-coef", type=float, default=0.0005,
                     help="entropy term coefficient (default: 0.0005)")
+parser.add_argument("--dissim-coef", type=float, default=0.,
+                    help="state dis-similarity coefficient, only use with ssp obs or env wrappers (default: 0)")
 parser.add_argument("--entropy-decay", type=float, default=1,
                     help="entropy decay coefficient (default: 0.99)")
 parser.add_argument("--memory-cap", type=int, default=100000,
@@ -201,9 +203,12 @@ elif (args.env[:8]=='MiniGrid') or (args.env[:6]=='BabyAI'):
             envs.append( MiniGridOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
     elif (args.wrapper =='ssp-xy'):
         from wrappers import SSPMiniGridXYWrapper
-        for i in range(args.procs):
+        for i in range(args.procs): #***
+            # envs.append( SSPMiniActionWrapper(SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+            #                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'), 
+            #                                   seed=args.seed, shape_out=args.ssp_dim) )
             envs.append( SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
-                                 shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'))
+                                 shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set') )
     elif(args.wrapper =='ssp-view'):
         from wrappers import SSPMiniGridViewWrapper
         for i in range(args.procs):
@@ -278,7 +283,7 @@ txt_logger.info("{}\n".format(model))
 #reshape_reward = lambda o,a,r,d: -0.1 if r==0 else 10
 if args.algo == "a2c":
     algo = A2CAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
-                            args.entropy_coef,args.entropy_decay, args.value_loss_coef, args.max_grad_norm, args.recurrence,
+                            args.entropy_coef,args.entropy_decay, args.value_loss_coef, args.dissim_coef, args.max_grad_norm, args.recurrence,
                             args.optim_alpha, args.optim_eps, preprocess_obss)
 elif args.algo == "ppo":
     algo = PPOAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,

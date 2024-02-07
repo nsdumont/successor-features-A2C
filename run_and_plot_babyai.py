@@ -19,7 +19,7 @@ n_frames = [100000,100000,
 algos = ['a2c']
 wrappers = ['ssp-lang', 'ssp-view', 'none']
 
-# all_models = []
+all_models = []
 for i, env in enumerate(envs):
     models = []
     for algo in algos:
@@ -44,7 +44,7 @@ for i, env in enumerate(envs):
                   + " --env  " + env + " --frames " + str(n_frames[i]) + " --procs 1 --frames-per-proc 100 --plot False" )
                 
             
-    # all_models.append(models)
+    all_models.append(models)
 
 for j,env in enumerate(envs):
     fig =plt.figure(figsize=(7,3))

@@ -6,7 +6,7 @@ import numpy as np
 import sys,os
 sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
 from spaces import HexagonalSSPSpace, RandomSSPSpace
-    
+from distributions import SPDistribution
 
 
 ### Modules for getting feature representation from raw input
@@ -264,14 +264,14 @@ class Curiosity(nn.Module):
 
 ## Actor Modules
 class DiscreteActor(nn.Module):
-    def __init__(self,embedding_size, n_actions):
+    def __init__(self,embedding_size, n_actions, hidden_size=64):
         super(DiscreteActor, self).__init__()
         self.n_actions = n_actions
         self.embedding_size = embedding_size
         self.actor_layers = nn.Sequential(
-            nn.Linear(self.embedding_size, 64),
+            nn.Linear(self.embedding_size, hidden_size),
             nn.Tanh(),
-            nn.Linear(64, self.n_actions)
+            nn.Linear(hidden_size, self.n_actions)
         )
         
         
@@ -281,18 +281,18 @@ class DiscreteActor(nn.Module):
         return dist
     
 class ContinuousActor(nn.Module):
-    def __init__(self,embedding_size, n_actions, hidden_size=40):
+    def __init__(self,embedding_size, n_actions, hidden_size=64):
         super(ContinuousActor, self).__init__()
         self.embedding_size = embedding_size
         self.n_actions = n_actions
-        self.actor = nn.Sequential(
+        self.actor_layers = nn.Sequential(
             nn.Linear(self.embedding_size, hidden_size),
             nn.ReLU()
         )
         
         self.mean = nn.Sequential(
             nn.Linear(hidden_size, self.n_actions),
-            nn.Tanh(),
+            nn.Tanh(), # actions must be normlized
         )
         
         self.var = nn.Sequential(
@@ -302,8 +302,26 @@ class ContinuousActor(nn.Module):
         )
         
     def forward(self, embedding):
-        x = self.actor(embedding)
+        x = self.actor_layers(embedding)
         mean = self.mean(x)
         scale = self.var(x) + 1e-16
         dist = torch.distributions.normal.Normal(mean, scale)
+        return dist
+    
+class SPActor(nn.Module):
+    def __init__(self,embedding_size, n_actions, action_space, hidden_size=64):
+        super(SPActor, self).__init__()
+        self.embedding_size = embedding_size
+        self.action_space=action_space
+        self.n_actions = n_actions
+        self.actor_layers = nn.Sequential(
+            nn.Linear(self.embedding_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, self.n_actions),
+            nn.Tanh(),
+        )
+          
+    def forward(self, embedding):
+        x = self.actor_layers(embedding)
+        dist = SPDistribution(x,self.action_space)
         return dist

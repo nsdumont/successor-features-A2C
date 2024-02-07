@@ -8,12 +8,12 @@ class A2CAlgo(BaseAlgo):
     """The Advantage Actor-Critic algorithm."""
 
     def __init__(self, envs, model, device=None, num_frames_per_proc=None, discount=0.99, lr=0.01, gae_lambda=0.95,
-                 entropy_coef=0.01, entropy_decay=0.99,value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
+                 entropy_coef=0.01, entropy_decay=0.99,value_loss_coef=0.5, dissim_coef=0, max_grad_norm=0.5, recurrence=4,
                  rmsprop_alpha=0.99, rmsprop_eps=1e-8, preprocess_obss=None, reshape_reward=None):
         num_frames_per_proc = num_frames_per_proc or 8
 
         super().__init__(envs, model, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,entropy_decay,
-                         value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward)
+                         value_loss_coef,dissim_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward)
 
         self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr,
                                              alpha=rmsprop_alpha, eps=rmsprop_eps)
@@ -50,7 +50,7 @@ class A2CAlgo(BaseAlgo):
 
             entropy = dist.entropy().mean()
 
-            policy_loss = -(dist.log_prob(sb.action) * sb.advantage).mean()
+            policy_loss = -(dist.log_prob(sb.action) * sb.advantage).mean() 
 
             value_loss = (value - sb.returnn).pow(2).mean()
 

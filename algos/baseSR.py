@@ -14,7 +14,7 @@ import numpy as np
 class BaseSRAlgo(ABC):
     """The base class for RL algorithms."""
 
-    def __init__(self, envs, model, target, device, num_frames_per_proc, discount, lr, gae_lambda, 
+    def __init__(self, envs, model, target, device, num_frames_per_proc, discount, lr, gae_lambda, dissim_coef,
                  max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward=None):
         """
         Initializes a `BaseSRAlgo` instance.
@@ -129,6 +129,8 @@ class BaseSRAlgo(ABC):
         self.log_return = [0] * self.num_procs
         self.log_reshaped_return = [0] * self.num_procs
         self.log_num_frames = [0] * self.num_procs
+        
+        self.dissim_coef=dissim_coef
 
     def collect_experiences(self):
         """Collects rollouts and computes advantages.
