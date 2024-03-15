@@ -7,6 +7,7 @@ import math
 from ReplayMemory import ReplayMemory
 
 from utils import default_preprocess_obss, DictList, ParallelEnv
+from gymnasium.spaces.dict import Dict
 
 
 import numpy as np
@@ -14,7 +15,7 @@ import numpy as np
 class BaseSRAlgo(ABC):
     """The base class for RL algorithms."""
 
-    def __init__(self, envs, model, target, device, num_frames_per_proc, discount, lr, gae_lambda, dissim_coef,
+    def __init__(self, envs, model, device, num_frames_per_proc, discount, lr, gae_lambda, dissim_coef,
                  max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward=None):
         """
         Initializes a `BaseSRAlgo` instance.
@@ -53,12 +54,12 @@ class BaseSRAlgo(ABC):
         # Store parameters
         self.env = ParallelEnv(envs)
         self.model = model
-        self.target = target
         self.device = device
         self.num_frames_per_proc = num_frames_per_proc
         self.discount = discount
         self.lr = lr
         self.gae_lambda = gae_lambda
+        self.dissim_coef=dissim_coef
         self.max_grad_norm = max_grad_norm
         self.recurrence = recurrence
         
@@ -82,8 +83,6 @@ class BaseSRAlgo(ABC):
 
         self.model.to(self.device)
         self.model.train()
-        self.target.to(self.device)
-        self.target.train()
 
         # Store helpers values
 
@@ -97,6 +96,7 @@ class BaseSRAlgo(ABC):
 
         self.obs = self.env.reset()
         self.obss = [None]*(shape[0])
+        self.preprocessed_obss = [None]*(shape[0])
         if self.model.recurrent:
             self.memory = torch.zeros(shape[1], self.model.memory_size, device=self.device)
             self.memories = torch.zeros(*shape, self.model.memory_size, device=self.device)
@@ -114,10 +114,12 @@ class BaseSRAlgo(ABC):
         self.log_probs = torch.zeros(*shape, device=self.device)
         self.embeddings = torch.zeros(*vec_shape, device=self.device)
         self.successors = torch.zeros(*vec_shape, device=self.device)
+        if dissim_coef>0:
+            if type(envs[0].observation_space)==Dict:
+                self.obs_mean =  torch.zeros( envs[0].observation_space['image'].shape_out,   device=self.device)
+            else:
+                self.obs_mean =  torch.zeros(envs[0].observation_space.shape_out, device=self.device)
         
-        self.target_values = torch.zeros(*shape, device=self.device)
-        self.target_embeddings = torch.zeros(*vec_shape, device=self.device)
-        self.target_successors = torch.zeros(*vec_shape, device=self.device)
 
         # Initialize log values
 
@@ -166,18 +168,14 @@ class BaseSRAlgo(ABC):
             with torch.no_grad():
                 if self.model.use_memory:
                     dist, value, embedding, _, successor, _, memory = self.model(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
-                    _, target_value, target_embedding, _, target_successor, _, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
                 else:
                     dist, value, embedding, _, successor, _, _ = self.model(preprocessed_obs)
-                    _, target_value, target_embedding, _, target_successor, _, _ = self.target(preprocessed_obs)
                     
-                    
+            action = dist.sample().detach()       
             if self.continuous_action:
-                action = dist.sample().detach()
                 action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action)
                 torch.nan_to_num(action, nan=torch.Tensor(self.env.envs[0].action_space.sample()), posinf=self.env.envs[0].max_action, neginf=self.env.envs[0].min_action)
-            else:
-                action = dist.sample().detach()
+        
             obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
             done = tuple(a | b for a, b in zip(terminated, truncated))
 
@@ -187,6 +185,9 @@ class BaseSRAlgo(ABC):
             self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
                                  self.FloatTensor([reward])))
             self.obss[i] = self.obs
+            if self.dissim_coef > 0:
+                self.obs_mean += preprocessed_obs.image.sum(axis=0)
+            self.preprocessed_obss[i] = preprocessed_obs
             self.obs = obs 
             if self.model.use_memory:
                 self.memories[i] = self.memory
@@ -198,9 +199,6 @@ class BaseSRAlgo(ABC):
             self.embeddings[i] = embedding
             self.successors[i] = successor
             
-            self.target_values[i] = target_value
-            self.target_embeddings[i] = target_embedding
-            self.target_successors[i] = target_successor
             if self.reshape_reward is not None:
                 self.rewards[i] = torch.tensor([
                     self.reshape_reward(obs_, action_, reward_, done_)
@@ -247,22 +245,29 @@ class BaseSRAlgo(ABC):
         
         with torch.no_grad():
             if self.model.use_memory:
-                _, next_value, _, _, next_successor, _, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) #target
+                _, next_value, _, _, next_successor, _, _ = self.model(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
             else:
-                _, next_value, _, _, next_successor, _, _ = self.target(preprocessed_obs)
+                _, next_value, _, _, next_successor, _, _ = self.model(preprocessed_obs)
 
-
+        if self.dissim_coef > 0:
+            vec_obs = torch.stack([torch.stack([self.preprocessed_obss[i][j].image
+                        for j in range(self.num_procs) ]) for i in range(self.num_frames_per_proc)])
+            self.obs_mean /= torch.linalg.norm(self.obs_mean)
+            sims = (vec_obs @ self.obs_mean)**2
+            self.intrinsic_rewards = self.dissim_coef*(1-sims)
+        else:
+            self.intrinsic_rewards = torch.zeros(self.rewards.shape, device=self.device)
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
-            next_successor = self.target_successors[i+1] if i < self.num_frames_per_proc - 1 else next_successor
-            next_value = self.target_values[i+1] if i < self.num_frames_per_proc - 1 else next_value
+            next_successor = self.successors[i+1] if i < self.num_frames_per_proc - 1 else next_successor
             next_SR_advantage = self.SR_advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
+            next_value = self.values[i+1] if i < self.num_frames_per_proc - 1 else next_value
             next_V_advantage = self.V_advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
 
-            SR_delta = self.target_embeddings[i] + (self.discount * next_successor * next_mask.reshape(-1,1)) - self.target_successors[i]
+            SR_delta = self.embeddings[i] + (self.discount * next_successor * next_mask.reshape(-1,1)) - self.successors[i]
             self.SR_advantages[i] = SR_delta + (self.discount * self.gae_lambda * next_SR_advantage * next_mask.reshape(-1,1))
             
-            V_delta = self.rewards[i] + self.discount * next_value * next_mask - self.target_values[i]
+            V_delta = self.intrinsic_rewards[i] + self.rewards[i] + self.discount * next_value * next_mask - self.values[i]
             self.V_advantages[i] = V_delta + self.discount * self.gae_lambda * next_V_advantage * next_mask
 
         # Define experiences:

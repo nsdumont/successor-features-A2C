@@ -1,0 +1,3338 @@
+diff --git a/algos/a2c.py b/algos/a2c.py
+index cc47e2d..e7110d0 100755
+--- a/algos/a2c.py
++++ b/algos/a2c.py
+@@ -8,7 +8,7 @@ class A2CAlgo(BaseAlgo):
+     """The Advantage Actor-Critic algorithm."""
+ 
+     def __init__(self, envs, model, device=None, num_frames_per_proc=None, discount=0.99, lr=0.01, gae_lambda=0.95,
+-                 entropy_coef=0.01, entropy_decay=0.99,value_loss_coef=0.5, dissim_coef=0, max_grad_norm=0.5, recurrence=4,
++                 entropy_coef=0.01, entropy_decay=0,value_loss_coef=0.5, dissim_coef=0, max_grad_norm=0.5, recurrence=4,
+                  rmsprop_alpha=0.99, rmsprop_eps=1e-8, preprocess_obss=None, reshape_reward=None):
+         num_frames_per_proc = num_frames_per_proc or 8
+ 
+@@ -77,12 +77,12 @@ class A2CAlgo(BaseAlgo):
+ 
+         self.optimizer.zero_grad()
+         update_loss.backward()
+-        update_grad_norm = sum(p.grad.data.norm(2) ** 2 for p in self.model.parameters()) ** 0.5
++        update_grad_norm = sum(p.grad.data.norm(2) ** 2 if p.requires_grad else 0 for p in self.model.parameters()) ** 0.5
+         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+         self.optimizer.step()
+ 
+         # Log some values
+-        self.entropy_coef = self.entropy_coef*self.entropy_decay
++        self.entropy_coef = self.entropy_coef*(1-self.entropy_decay)
+         logs = {
+             "entropy": update_entropy,
+             "value": update_value,
+diff --git a/algos/base.py b/algos/base.py
+index cbee02d..43ccee9 100755
+--- a/algos/base.py
++++ b/algos/base.py
+@@ -6,7 +6,7 @@ import numpy as np
+ 
+ from utils import default_preprocess_obss, DictList, ParallelEnv
+ # from algos.blr import BayesianLinearRegression 
+-
++from gymnasium.spaces.dict import Dict
+ 
+ class BaseAlgo(ABC):
+     """The base class for RL algorithms."""
+@@ -63,6 +63,7 @@ class BaseAlgo(ABC):
+         self.preprocess_obss = preprocess_obss or default_preprocess_obss
+         self.reshape_reward = reshape_reward
+         self.continuous_action = model.continuous_action
++        self.dissim_coef=dissim_coef
+ 
+         # Control parameters
+ 
+@@ -85,8 +86,10 @@ class BaseAlgo(ABC):
+ 
+         self.obs = self.env.reset()
+         self.obss = [None]*(shape[0])
++        self.preprocessed_obss = [None]*(shape[0])
+         if self.model.recurrent:
+             self.memory = torch.zeros(shape[1], self.model.memory_size, device=self.device)
++            self.target_memory = torch.zeros(shape[1], self.model.memory_size, device=self.device)
+             self.memories = torch.zeros(*shape, self.model.memory_size, device=self.device)
+         self.mask = torch.ones(shape[1], device=self.device)
+         self.masks = torch.zeros(*shape, device=self.device)
+@@ -98,7 +101,17 @@ class BaseAlgo(ABC):
+         self.rewards = torch.zeros(*shape, device=self.device)
+         self.advantages = torch.zeros(*shape, device=self.device)
+         self.log_probs = torch.zeros(*shape, device=self.device)
+-
++        if dissim_coef>0:
++            if type(envs[0].observation_space)==Dict:
++                self.obs_mean =  torch.zeros( envs[0].observation_space['image'].shape_out,   device=self.device)
++            else:
++                self.obs_mean =  torch.zeros(envs[0].observation_space.shape_out, device=self.device)
++        
++        #     if type(envs[0].observation_space)==Dict:
++        #         self.sigma =  torch.zeros(shape[1], envs[0].observation_space['image'].shape_out,  envs[0].observation_space['image'].shape_out, device=self.device)
++        #     else:
++        #         self.sigma =  torch.zeros(shape[1], envs[0].observation_space.shape_out,  envs[0].observation_space.shape_out, device=self.device)
++        
+         # Initialize log values
+ 
+         self.log_episode_return = torch.zeros(self.num_procs, device=self.device)
+@@ -110,7 +123,6 @@ class BaseAlgo(ABC):
+         self.log_reshaped_return = [0] * self.num_procs
+         self.log_num_frames = [0] * self.num_procs
+         
+-        self.dissim_coef=dissim_coef
+         
+         # self.use_blr=use_blr
+         # if use_blr:
+@@ -163,6 +175,10 @@ class BaseAlgo(ABC):
+             # Update experiences values
+ 
+             self.obss[i] = self.obs
++            if self.dissim_coef > 0:
++                self.obs_mean += self.discount*preprocessed_obs.image.sum(axis=0) #old version: no discount
++            # self.sigma += self.discount * torch.bmm(preprocessed_obs.image.unsqueeze(2), preprocessed_obs.image.unsqueeze(1))
++            self.preprocessed_obss[i] = preprocessed_obs
+             self.obs = obs
+             if self.model.recurrent:
+                 self.memories[i] = self.memory
+@@ -215,12 +231,17 @@ class BaseAlgo(ABC):
+             else:
+                 _, next_value = self.model(preprocessed_obs)
+ 
+-        if self.dissim_coef != 0:
+-            vec_obs = np.stack([np.stack([self.obss[i][j]['image']
++        if self.dissim_coef > 0:
++            vec_obs = torch.stack([torch.stack([self.preprocessed_obss[i][j].image
+                         for j in range(self.num_procs) ]) for i in range(self.num_frames_per_proc)])
+-            mu=vec_obs.sum(axis=(0,1))
+-            mu /= np.linalg.norm(mu)
+-            sims = torch.from_numpy((vec_obs @ mu)**2).to(self.device)
++            # vec_obs = torch.stack([torch.stack([self.preprocessed_obss[j][i].image
++            #             for j in range(self.num_frames_per_proc) ]) for i in range(self.num_procs)])
++            
++            # self.intrinsic_rewards = torch.diagonal(torch.bmm(vec_obs, torch.bmm(self.sigma, torch.swapaxes(vec_obs,1,2))), dim1=1,dim2=2)
++            # mu=vec_obs.sum(axis=(0,1))
++            #mu /= torch.linalg.norm(mu)
++            #sims = (vec_obs @ mu)**2
++            sims = vec_obs @ (self.obs_mean/torch.linalg.norm(self.obs_mean))  #old version: self.obs_mean \= self.norm; sims are squared
+             self.intrinsic_rewards = self.dissim_coef*(1-sims)
+         else:
+             self.intrinsic_rewards = torch.zeros(self.rewards.shape, device=self.device)
+diff --git a/algos/baseSR.py b/algos/baseSR.py
+index 7982871..936d276 100755
+--- a/algos/baseSR.py
++++ b/algos/baseSR.py
+@@ -7,6 +7,7 @@ import math
+ from ReplayMemory import ReplayMemory
+ 
+ from utils import default_preprocess_obss, DictList, ParallelEnv
++from gymnasium.spaces.dict import Dict
+ 
+ 
+ import numpy as np
+@@ -14,7 +15,7 @@ import numpy as np
+ class BaseSRAlgo(ABC):
+     """The base class for RL algorithms."""
+ 
+-    def __init__(self, envs, model, target, device, num_frames_per_proc, discount, lr, gae_lambda, dissim_coef,
++    def __init__(self, envs, model, device, num_frames_per_proc, discount, lr, gae_lambda, dissim_coef,
+                  max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward=None):
+         """
+         Initializes a `BaseSRAlgo` instance.
+@@ -53,12 +54,12 @@ class BaseSRAlgo(ABC):
+         # Store parameters
+         self.env = ParallelEnv(envs)
+         self.model = model
+-        self.target = target
+         self.device = device
+         self.num_frames_per_proc = num_frames_per_proc
+         self.discount = discount
+         self.lr = lr
+         self.gae_lambda = gae_lambda
++        self.dissim_coef=dissim_coef
+         self.max_grad_norm = max_grad_norm
+         self.recurrence = recurrence
+         
+@@ -82,8 +83,6 @@ class BaseSRAlgo(ABC):
+ 
+         self.model.to(self.device)
+         self.model.train()
+-        self.target.to(self.device)
+-        self.target.train()
+ 
+         # Store helpers values
+ 
+@@ -97,6 +96,7 @@ class BaseSRAlgo(ABC):
+ 
+         self.obs = self.env.reset()
+         self.obss = [None]*(shape[0])
++        self.preprocessed_obss = [None]*(shape[0])
+         if self.model.recurrent:
+             self.memory = torch.zeros(shape[1], self.model.memory_size, device=self.device)
+             self.memories = torch.zeros(*shape, self.model.memory_size, device=self.device)
+@@ -114,10 +114,12 @@ class BaseSRAlgo(ABC):
+         self.log_probs = torch.zeros(*shape, device=self.device)
+         self.embeddings = torch.zeros(*vec_shape, device=self.device)
+         self.successors = torch.zeros(*vec_shape, device=self.device)
++        if dissim_coef>0:
++            if type(envs[0].observation_space)==Dict:
++                self.obs_mean =  torch.zeros( envs[0].observation_space['image'].shape_out,   device=self.device)
++            else:
++                self.obs_mean =  torch.zeros(envs[0].observation_space.shape_out, device=self.device)
+         
+-        self.target_values = torch.zeros(*shape, device=self.device)
+-        self.target_embeddings = torch.zeros(*vec_shape, device=self.device)
+-        self.target_successors = torch.zeros(*vec_shape, device=self.device)
+ 
+         # Initialize log values
+ 
+@@ -166,18 +168,14 @@ class BaseSRAlgo(ABC):
+             with torch.no_grad():
+                 if self.model.use_memory:
+                     dist, value, embedding, _, successor, _, memory = self.model(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
+-                    _, target_value, target_embedding, _, target_successor, _, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
+                 else:
+                     dist, value, embedding, _, successor, _, _ = self.model(preprocessed_obs)
+-                    _, target_value, target_embedding, _, target_successor, _, _ = self.target(preprocessed_obs)
+-                    
+                     
++            action = dist.sample().detach()       
+             if self.continuous_action:
+-                action = dist.sample().detach()
+                 action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action)
+                 torch.nan_to_num(action, nan=torch.Tensor(self.env.envs[0].action_space.sample()), posinf=self.env.envs[0].max_action, neginf=self.env.envs[0].min_action)
+-            else:
+-                action = dist.sample().detach()
++        
+             obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
+             done = tuple(a | b for a, b in zip(terminated, truncated))
+ 
+@@ -187,6 +185,9 @@ class BaseSRAlgo(ABC):
+             self.replay_memory.push((preprocessed_obs.image, preprocessed_obs.text,
+                                  self.FloatTensor([reward])))
+             self.obss[i] = self.obs
++            if self.dissim_coef > 0:
++                self.obs_mean += preprocessed_obs.image.sum(axis=0)
++            self.preprocessed_obss[i] = preprocessed_obs
+             self.obs = obs 
+             if self.model.use_memory:
+                 self.memories[i] = self.memory
+@@ -198,9 +199,6 @@ class BaseSRAlgo(ABC):
+             self.embeddings[i] = embedding
+             self.successors[i] = successor
+             
+-            self.target_values[i] = target_value
+-            self.target_embeddings[i] = target_embedding
+-            self.target_successors[i] = target_successor
+             if self.reshape_reward is not None:
+                 self.rewards[i] = torch.tensor([
+                     self.reshape_reward(obs_, action_, reward_, done_)
+@@ -247,22 +245,29 @@ class BaseSRAlgo(ABC):
+         
+         with torch.no_grad():
+             if self.model.use_memory:
+-                _, next_value, _, _, next_successor, _, _ = self.target(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) #target
++                _, next_value, _, _, next_successor, _, _ = self.model(preprocessed_obs, memory=self.memory * self.mask.unsqueeze(1)) 
+             else:
+-                _, next_value, _, _, next_successor, _, _ = self.target(preprocessed_obs)
+-
+-
++                _, next_value, _, _, next_successor, _, _ = self.model(preprocessed_obs)
++
++        if self.dissim_coef > 0:
++            vec_obs = torch.stack([torch.stack([self.preprocessed_obss[i][j].image
++                        for j in range(self.num_procs) ]) for i in range(self.num_frames_per_proc)])
++            self.obs_mean /= torch.linalg.norm(self.obs_mean)
++            sims = (vec_obs @ self.obs_mean)**2
++            self.intrinsic_rewards = self.dissim_coef*(1-sims)
++        else:
++            self.intrinsic_rewards = torch.zeros(self.rewards.shape, device=self.device)
+         for i in reversed(range(self.num_frames_per_proc)):
+             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
+-            next_successor = self.target_successors[i+1] if i < self.num_frames_per_proc - 1 else next_successor
+-            next_value = self.target_values[i+1] if i < self.num_frames_per_proc - 1 else next_value
++            next_successor = self.successors[i+1] if i < self.num_frames_per_proc - 1 else next_successor
+             next_SR_advantage = self.SR_advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
++            next_value = self.values[i+1] if i < self.num_frames_per_proc - 1 else next_value
+             next_V_advantage = self.V_advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
+ 
+-            SR_delta = self.target_embeddings[i] + (self.discount * next_successor * next_mask.reshape(-1,1)) - self.target_successors[i]
++            SR_delta = self.embeddings[i] + (self.discount * next_successor * next_mask.reshape(-1,1)) - self.successors[i]
+             self.SR_advantages[i] = SR_delta + (self.discount * self.gae_lambda * next_SR_advantage * next_mask.reshape(-1,1))
+             
+-            V_delta = self.rewards[i] + self.discount * next_value * next_mask - self.target_values[i]
++            V_delta = self.intrinsic_rewards[i] + self.rewards[i] + self.discount * next_value * next_mask - self.values[i]
+             self.V_advantages[i] = V_delta + self.discount * self.gae_lambda * next_V_advantage * next_mask
+ 
+         # Define experiences:
+diff --git a/algos/ppo.py b/algos/ppo.py
+index d2d57e6..3626415 100755
+--- a/algos/ppo.py
++++ b/algos/ppo.py
+@@ -9,13 +9,13 @@ class PPOAlgo(BaseAlgo):
+     ([Schulman et al., 2015](https://arxiv.org/abs/1707.06347))."""
+ 
+     def __init__(self, envs, model, device=None, num_frames_per_proc=None, discount=0.99, lr=0.001, gae_lambda=0.95,
+-                 entropy_coef=0.01, entropy_decay=0.99, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
++                 entropy_coef=0.01, entropy_decay=0, value_loss_coef=0.5, dissim_coef=0, max_grad_norm=0.5, recurrence=4,
+                  adam_eps=1e-8, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
+                  reshape_reward=None):
+         num_frames_per_proc = num_frames_per_proc or 128
+ 
+         super().__init__(envs, model, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,entropy_decay,
+-                         value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward)
++                         value_loss_coef, dissim_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward)
+ 
+         self.clip_eps = clip_eps
+         self.epochs = epochs
+@@ -116,7 +116,7 @@ class PPOAlgo(BaseAlgo):
+                 log_grad_norms.append(grad_norm)
+ 
+         # Log some values
+-        self.entropy_coef = self.entropy_coef*self.entropy_decay
++        self.entropy_coef = self.entropy_coef*(1-self.entropy_decay)
+         logs = {
+             "entropy": numpy.mean(log_entropies),
+             "value": numpy.mean(log_values),
+diff --git a/algos/sr_a2c.py b/algos/sr_a2c.py
+index e989f84..7ec105e 100755
+--- a/algos/sr_a2c.py
++++ b/algos/sr_a2c.py
+@@ -2,43 +2,48 @@ import numpy as np
+ import torch
+ import torch.nn.functional as F
+ import itertools
+-from torch.autograd import Variable
+-from utils import DictList
+ 
+ from algos.baseSR import BaseSRAlgo
+ 
++import sys,os
++sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
++from utils import soft_update_params
+ 
+ class SRAlgo(BaseSRAlgo):
+ 
+-    def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
+-        lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, entropy_coef=0.01, entropy_decay=0.99, norm_loss_coef=1,
++    def __init__(self, envs, model, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
++        lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, dissim_coef=0.0, entropy_coef=0.01, entropy_decay=0, 
+         max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=100000,batch_size=200, preprocess_obss=None, reshape_reward=None):
+  
+         num_frames_per_proc = num_frames_per_proc or 10
+ 
+-        super().__init__(envs, model, target, device, num_frames_per_proc, discount,  lr_feature, gae_lambda, max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
++        super().__init__(envs, model, device, num_frames_per_proc, discount,  lr_feature, gae_lambda, dissim_coef, max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
+       
+-        self.norm_loss_coef = norm_loss_coef
+         self.entropy_coef = entropy_coef
+-        self.entropy_decay, = entropy_decay,
++        self.entropy_decay = entropy_decay
+         self.feature_learn = feature_learn
+         self.batch_size=batch_size
+         
+         
+-        if self.feature_learn == "combined":
+-            self.optimizer = torch.optim.RMSprop(self.model.parameters(),
+-                                          lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps)
+-        else:
+-            if self.feature_learn != "none":
+-                self.feature_optimizer = torch.optim.RMSprop(list(self.model.feature_in.parameters()) +
+-                                                              list(self.model.feature_out.parameters()) ,#{'params': self.model.actor.parameters()} ],
+-                                                              lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
++        # if self.feature_learn == "combined":
++        #     self.optimizer = torch.optim.RMSprop(self.model.parameters(),
++        #                                   lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps)
++        # else:
++        if self.feature_learn != "none":
++            self.feature_optimizer = torch.optim.RMSprop(list(self.model.feature_net.parameters()) +
++                                                          list(self.model.feature_learner.parameters()) ,#{'params': self.model.actor.parameters()} ],
++                                                          lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
+             self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+                                               lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
+-            self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
+-                                              lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps)
+-            self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
+-                                          lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps)
++        else:
++            self.actor_optimizer = torch.optim.RMSprop(list(self.model.actor.parameters()) +
++                                                       list(self.model.feature_net.parameters()),
++                                              lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
++        
++        self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
++                                          lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps)
++        self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
++                                      lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps)
+         
+         self.num_updates = 0
+         
+@@ -53,9 +58,7 @@ class SRAlgo(BaseSRAlgo):
+         # Initialize update values
+         update_entropy = 0
+         update_policy_loss = 0
+-        update_reconstruction_loss = 0
+         update_sr_loss = 0#torch.zeros(1, requires_grad=True, device=self.device)
+-        update_norm_loss = 0
+         update_actor_loss = 0#torch.zeros(1, requires_grad=True, device=self.device)
+         update_feature_loss = 0#torch.zeros(1, requires_grad=True, device=self.device)
+         update_reward_loss = 0
+@@ -71,10 +74,15 @@ class SRAlgo(BaseSRAlgo):
+             sb = exps[inds + i]
+ 
+             # Run model
++            if not self.model.continuous_action:
++                processed_action = F.one_hot(sb[:-1].action.long(),self.model.n_actions)
++                #sb[:-1].action.long()#
++            else:
++                processed_action = sb[:-1].action
+             if self.model.use_memory:
+-                _, _, _, predictions, _, _, _ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
++                _, _, _, feature_loss, _, _, _ = self.model(sb[:-1].obs,processed_action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
+             else:
+-                _, _, _, predictions, _, _, _ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
++                _, _, _, feature_loss, _, _, _ = self.model(sb[:-1].obs, processed_action,sb[1:].obs)
+      
+             if self.model.use_memory:
+                 dist, value, embedding, _, successor, reward, memory = self.model(sb.obs, memory= memory * sb.mask)
+@@ -82,46 +90,7 @@ class SRAlgo(BaseSRAlgo):
+                 dist, value, embedding, _, successor, reward, _ = self.model(sb.obs)
+                     
+             # Compute loss
+-            
+-            # Feature loss
+-            if self.feature_learn == "reconstruction":
+-                reconstruction_loss = F.mse_loss(predictions, sb.obs[:-1].image)
+-                norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
+-                feature_loss = reconstruction_loss + self.norm_loss_coef*norm_loss 
+-            elif self.feature_learn=="curiosity":
+-                next_embedding, next_obs_pred, action_pred = predictions
+-                forward_loss = F.mse_loss(next_obs_pred, next_embedding)
+-                if self.model.continuous_action:
+-                    inverse_loss = F.mse_loss(action_pred.reshape(-1),sb[:-1].action.float())
+-                else:
+-                    inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) 
+-                reconstruction_loss = forward_loss + inverse_loss 
+-                norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
+-                feature_loss = reconstruction_loss + self.norm_loss_coef*norm_loss 
+-            elif self.feature_learn=="Laplacian":
+-                #from https://arxiv.org/pdf/2209.14935.pdf
+-                if self.model.use_memory:
+-                    embedding, _, _ = self.model.feature_in(sb.obs[:-1], memory= memory[:-1,:] * sb.mask[:-1])
+-                    next_embedding, _, _ = self.model.feature_in(sb.obs[1:], memory= memory[1:,:] * sb.mask[1:])
+-                else:
+-                    embedding, _, _ = self.model.feature_in(sb.obs[:-1], memory=None)
+-                    next_embedding, _, _ = self.model.feature_in(sb.obs[1:], memory=None)
+-                reconstruction_loss = ( embedding - next_embedding ).pow (2).mean()
+-                # compute Orthonormality losss
+-                Cov = torch.matmul ( embedding , next_embedding.T )
+-                I = torch.eye (*Cov.size(), device = Cov.device )
+-                off_diag = ~I.bool()
+-                orth_loss_diag = -2*Cov.diag().mean()
+-                orth_loss_offdiag = Cov[ off_diag ].pow(2).mean()
+-                orth_loss = orth_loss_offdiag + orth_loss_diag
+-                reconstruction_loss += orth_loss
+-                feature_loss = reconstruction_loss
+-            else:
+-                reconstruction_loss = torch.zeros(1).to(self.device)
+-                norm_loss = torch.zeros(1).to(self.device)
+-                feature_loss = torch.zeros(1).to(self.device)
+ 
+-            
+             reward_loss = F.mse_loss(reward, sb.reward )
+             sr_loss = F.mse_loss(successor, sb.successorn) 
+             entropy = dist.entropy().mean()
+@@ -136,8 +105,7 @@ class SRAlgo(BaseSRAlgo):
+             # Update batch values
+             update_entropy += entropy.item()
+             update_policy_loss += policy_loss.item()
+-            update_reconstruction_loss += reconstruction_loss.item()
+-            update_norm_loss += norm_loss.item()
++            # update_norm_loss += norm_loss.item()
+             update_sr_loss += sr_loss
+             update_actor_loss += actor_loss
+             update_feature_loss += feature_loss
+@@ -147,8 +115,6 @@ class SRAlgo(BaseSRAlgo):
+         # Update update values
+         update_entropy /= self.recurrence
+         update_policy_loss /= self.recurrence
+-        update_reconstruction_loss /= self.recurrence
+-        update_norm_loss /= self.recurrence
+         update_sr_loss /= self.recurrence
+         update_actor_loss /= self.recurrence
+         update_feature_loss /= self.recurrence
+@@ -156,63 +122,59 @@ class SRAlgo(BaseSRAlgo):
+ 
+         # Update all parts
+         # Update SR
+-        if self.feature_learn == "combined":
+-            update_loss = update_sr_loss + update_feature_loss + update_reward_loss + update_actor_loss
+-            self.optimizer.zero_grad()
+-            update_loss.backward(retain_graph=False)
+-            update_grad_norm = sum(p.grad.data.norm(2) ** 2 for p in self.model.parameters()) ** 0.5
+-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+-            self.optimizer.step()   
+-        else:
+-            self.sr_optimizer.zero_grad()
+-            update_sr_loss.backward(retain_graph=True)
+-            update_grad_norm_sr = sum(p.grad.data.norm(2) ** 2 for p in self.model.SR.parameters()) ** 0.5
+-            torch.nn.utils.clip_grad_norm_(self.model.SR.parameters(), self.max_grad_norm)
+-            self.sr_optimizer.step()
+-            
+-            # Update actor (policy loss + entropy)
+-            self.actor_optimizer.zero_grad()
+-            update_actor_loss.backward(retain_graph=True)
+-            update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 for p in self.model.actor.parameters()) ** 0.5
+-            torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
+-            self.actor_optimizer.step()
+-            
+-            
+-            self.reward_optimizer.zero_grad()
+-            update_reward_loss.backward(retain_graph=self.feature_learn != "none")
+-            update_grad_norm_reward = sum(p.grad.data.norm(2) ** 2 for p in self.model.reward.parameters()) ** 0.5
+-            torch.nn.utils.clip_grad_norm_(self.model.reward.parameters(), self.max_grad_norm)
+-            self.reward_optimizer.step()
++        # if self.feature_learn == "combined":
++        #     update_loss = update_sr_loss + update_feature_loss + update_reward_loss + update_actor_loss
++        #     self.optimizer.zero_grad()
++        #     update_loss.backward(retain_graph=False)
++        #     update_grad_norm = sum(p.grad.data.norm(2) ** 2 for p in self.model.parameters()) ** 0.5
++        #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
++        #     self.optimizer.step()   
++        # else:
++        self.sr_optimizer.zero_grad()
++        update_sr_loss.backward(retain_graph=True)
++        update_grad_norm_sr = sum(p.grad.data.norm(2) ** 2 for p in self.model.SR.parameters()) ** 0.5
++        torch.nn.utils.clip_grad_norm_(self.model.SR.parameters(), self.max_grad_norm)
++        self.sr_optimizer.step()
++        
++        # Update actor (policy loss + entropy)
++        self.actor_optimizer.zero_grad()
++        update_actor_loss.backward(retain_graph=True)
++        update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 for p in self.model.actor.parameters()) ** 0.5
++        torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
++        self.actor_optimizer.step()
++        
++        
++        self.reward_optimizer.zero_grad()
++        update_reward_loss.backward(retain_graph=self.feature_learn != "none")
++        update_grad_norm_reward = sum(p.grad.data.norm(2) ** 2 for p in self.model.reward.parameters()) ** 0.5
++        torch.nn.utils.clip_grad_norm_(self.model.reward.parameters(), self.max_grad_norm)
++        self.reward_optimizer.step()
++        
++         
++        # Update feature embedding net
++        if self.feature_learn != "none":
++            self.feature_optimizer.zero_grad()
++            update_feature_loss.backward(retain_graph=False)
++            # update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_net.parameters()) ** 0.5 + sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_learner.parameters()) ** 0.5
++            torch.nn.utils.clip_grad_norm_(self.model.feature_net.parameters(), self.max_grad_norm)
++            torch.nn.utils.clip_grad_norm_(self.model.feature_learner.parameters(), self.max_grad_norm)
++            self.feature_optimizer.step()
+             
+-             
+-            # Update feature embedding net
+-            if self.feature_learn != "none":
+-                self.feature_optimizer.zero_grad()
+-                #update_loss = update_feature_loss + update_reward_loss
+-                update_feature_loss.backward(retain_graph=False)
+-                update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_in.parameters()) ** 0.5
+-                torch.nn.utils.clip_grad_norm_(self.model.feature_in.parameters(), self.max_grad_norm)
+-                torch.nn.utils.clip_grad_norm_(self.model.feature_out.parameters(), self.max_grad_norm)
+-                self.feature_optimizer.step()
+-            else:
+-                update_grad_norm_features = torch.Tensor(np.zeros(1))
++            soft_update_params(self.model.feature_net, self.model.target_feature_net, 0.01)
+             
+             
+-    
++        update_grad_norm = np.max([ update_grad_norm_sr.item(),update_grad_norm_reward.item(),
++                                       update_grad_norm_actor.item()]) 
+             
+-            update_grad_norm = np.max([ update_grad_norm_sr.item(),update_grad_norm_reward.item(),
+-                                       update_grad_norm_actor.item(), 
+-                                       update_grad_norm_features.item()]) 
+-
+         
++
+         
+         # Log some values
+-        self.entropy_coef = self.entropy_coef*self.entropy_decay
++        self.entropy_coef = self.entropy_coef*(1-self.entropy_decay)
+         logs = {
+             "feature_loss": update_feature_loss.item(),
+             "reward_loss": update_reward_loss.item(),
+             "sr_loss": update_sr_loss.item(),
+-            "norm_loss": update_norm_loss,
+             "entropy": update_entropy,
+             "policy_loss": update_policy_loss,
+             "grad_norm": update_grad_norm # "A_mse": update_A_loss
+diff --git a/algos/sr_ppo.py b/algos/sr_ppo.py
+index d3a1788..2c7645f 100755
+--- a/algos/sr_ppo.py
++++ b/algos/sr_ppo.py
+@@ -3,39 +3,38 @@ import torch
+ import torch.nn.functional as F
+ import itertools
+ import torch.autograd
+-from torch.autograd import Variable
+ from utils import DictList
+ 
+ from algos.baseSR import BaseSRAlgo
+ 
++import sys,os
++sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
++from utils import soft_update_params
+ 
+ class SRPPOAlgo(BaseSRAlgo):
+ 
+-    def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
+-        lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, entropy_coef=0.01,  recon_loss_coef=1,norm_loss_coef=1,
+-        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200, epochs=4, batch_size=256, clip_eps=0.2, preprocess_obss=None, reshape_reward=None,use_V_advantage=False):
++    def __init__(self, envs, model, feature_learn="cm", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
++        lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, dissim_coef=0.01, entropy_coef=0.01, entropy_decay=0, recon_loss_coef=1,
++        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200, epochs=4, batch_size=256, clip_eps=0.2, preprocess_obss=None, reshape_reward=None,use_V_advantage=True):
+  
+         num_frames_per_proc = num_frames_per_proc or 200
+ 
+-        super().__init__(envs, model, target, device, num_frames_per_proc, discount,  lr_feature, gae_lambda, max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
++        super().__init__(envs, model, device, num_frames_per_proc, discount,  lr_feature, gae_lambda, max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
+       
+         #torch.autograd.set_detect_anomaly(True)
+         
+-        self.norm_loss_coef = norm_loss_coef
++        self.dissim_coef = dissim_coef
+         self.entropy_coef = entropy_coef
++        self.entropy_decay, = entropy_decay
+         self.recon_loss_coef = recon_loss_coef
+         self.feature_learn = feature_learn
+         self.clip_eps = clip_eps
+         self.batch_size=batch_size
+         self.use_V_advantage= use_V_advantage
+         self.epochs = epochs
+-        #params = [self.model.feature_in.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
+-        #self.feature_params = itertools.chain(*params)
+-        
+-        #self.feature_optimizer = torch.optim.RMSprop(self.feature_params, lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
+ 
+-        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},
+-                                                      {'params': self.model.feature_out.parameters()} ],
++        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_net.parameters()},
++                                                      {'params': self.model.feature_learner.parameters()} ],
+                                                      lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
+         self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+                                           lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
+@@ -43,12 +42,10 @@ class SRPPOAlgo(BaseSRAlgo):
+         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
+                                           lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
+           
+-        self.reward_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.reward.parameters()}],
++        self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
+                                           lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
+         
+-        #self.optimizer =  torch.optim.RMSprop(self.model.parameters(),
+-         #                                 lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) 
+-        
++
+         self.batch_num = 0
+  
+     def update_parameters(self, exps):
+@@ -83,35 +80,20 @@ class SRPPOAlgo(BaseSRAlgo):
+                     sb = exps[inds + i]
+                      
+                     # Compute loss
++                    if not self.model.continuous_action:
++                        processed_action = F.one_hot(sb[:-1].action.long(),self.model.n_actions)
++                    else:
++                        processed_action = sb[:-1].action
+                     if self.model.use_memory:
+-                        _, _, _, predictions, _, _, _,_ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
++                        _, _, _, feature_loss, _, _, _ = self.model(sb[:-1].obs,processed_action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
+                     else:
+-                        _, _, _, predictions, _, _,_ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
+-                      
++                        _, _, _, feature_loss, _, _, _ = self.model(sb[:-1].obs, processed_action,sb[1:].obs)
++             
+                     if self.model.use_memory:
+                         dist, value, embedding, _, successor, _,_, memory = self.model(sb.obs,memory= memory * sb.mask)
+                     else:
+                         dist, value, embedding, _, successor, _,_ = self.model(sb.obs)
+-                             
+-                    if self.feature_learn == "reconstruction":
+-                        reconstruction_loss = F.mse_loss(predictions, sb.obs[:-1].image)
+-                    elif self.feature_learn=="curiosity":
+-                        next_embedding, next_obs_pred, action_pred = predictions
+-                        forward_loss = F.mse_loss(next_obs_pred , next_embedding)
+-                        if self.model.continuous_action:
+-                            inverse_loss = F.mse_loss(action_pred.reshape(-1),sb[:-1].action.float())
+-                        else:
+-                            inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) # mse if continuous action
+-                        reconstruction_loss = forward_loss + inverse_loss 
+-    
+-                    if self.feature_learn != "none":
+-                        norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
+-                        feature_loss = reconstruction_loss + self.norm_loss_coef*norm_loss 
+-                    else:
+-                        reconstruction_loss = torch.Tensor(np.zeros(1))
+-                        norm_loss = torch.Tensor(np.zeros(1))
+-                        feature_loss = torch.Tensor(np.zeros(1))                
+-
++                    
+                     
+                     
+                     sr_clipped = sb.successor + torch.clamp(successor - sb.successor, -self.clip_eps, self.clip_eps)
+@@ -173,12 +155,13 @@ class SRPPOAlgo(BaseSRAlgo):
+                 # Update feature embedding net
+                 if self.feature_learn != "none":
+                     self.feature_optimizer.zero_grad()
+-                    #update_loss = update_feature_loss + update_reward_loss
+                     batch_feature_loss.backward(retain_graph=True)
+-                    update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_in.parameters()) ** 0.5
+-                    torch.nn.utils.clip_grad_norm_(self.model.feature_in.parameters(), self.max_grad_norm)
+-                    torch.nn.utils.clip_grad_norm_(self.model.feature_out.parameters(), self.max_grad_norm)
++                    update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_net.parameters()) ** 0.5
++                    torch.nn.utils.clip_grad_norm_(self.model.feature_net.parameters(), self.max_grad_norm)
++                    torch.nn.utils.clip_grad_norm_(self.model.feature_net.parameters(), self.max_grad_norm)
+                     self.feature_optimizer.step()
++                    
++                    soft_update_params(self.model.feature_net, self.target_feature_net, 0.01)
+                 else:
+                     update_grad_norm_features = torch.Tensor(np.zeros(1))
+                 
+@@ -215,7 +198,7 @@ class SRPPOAlgo(BaseSRAlgo):
+                 log_grad_norms.append(grad_norm)
+     
+         # Log some values
+-    
++        self.entropy_coef = self.entropy_coef*(1-self.entropy_decay)
+         logs = {
+             "entropy": np.mean(log_entropies),
+             "reward_loss": np.mean(log_reward_losses),
+@@ -257,7 +240,7 @@ class SRPPOAlgo(BaseSRAlgo):
+         return batches_starting_indexes
+     
+     def _get_feature_params(self):
+-        params = [self.model.feature_in.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
++        params = [self.model.feature_net.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
+         return itertools.chain(*params)
+ 
+ 
+diff --git a/models/model.py b/models/model.py
+index a39e6b2..338bb5e 100644
+--- a/models/model.py
++++ b/models/model.py
+@@ -1,28 +1,22 @@
+-import torch
+ import torch.nn as nn
+-import torch.nn.functional as F
+-from torch.distributions.categorical import Categorical
+ import torch_ac
+-import gymnasium as gym
+ import numpy as np
+ from gymnasium.spaces import Discrete, Box
+-from .submodels import ImageInput, FlatInput, SSPInput, IdentityInput, ContinuousActor, DiscreteActor, SPActor
++from .modules import mlp, ImageProcesser, FlatProcesser, SSPProcesser, IdentityProcesser
++from .modules import ContinuousActor, DiscreteActor
+ import sys,os
+ sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
+ from spaces import SSPBox, SSPDiscrete
++from utils import weight_init
+ 
+-# Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
+-def init_params(m):
+-    classname = m.__class__.__name__
+-    if classname.find("Linear") != -1:
+-        m.weight.data.normal_(0, 1)
+-        m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
+-        if m.bias is not None:
+-            m.bias.data.fill_(0)
+-
++feature_rep_options = {'image': ImageProcesser, 'flat': FlatProcesser, 
++                       'ssp': SSPProcesser, 'none': IdentityProcesser}
+ 
+ class ACModel(nn.Module, torch_ac.RecurrentACModel):
+-    def __init__(self, obs_space, action_space, use_memory=False, use_text=False,input_type="image",obs_space_sampler=None):
++    def __init__(self, obs_space, action_space, use_memory=False,
++                 use_text=False,normalize=False,input_type="image",obs_space_sampler=None,
++                 critic_hidden_size=64, actor_hidden_size=64, 
++                 feature_hidden_size=256, feature_size=64):
+         super().__init__()
+         
+         
+@@ -33,49 +27,40 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
+         # Form of input to model and the method for learning features
+         self.input_type = input_type
+ 
+-        if input_type == "image":
+-            self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text)
+-        elif input_type=="flat":
+-            self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text)
+-        elif input_type=="ssp":
+-            self.feature_in = SSPInput(obs_space,use_memory=use_memory,use_text=use_text)
+-        elif input_type=="none":
+-            self.feature_in = IdentityInput(obs_space,use_memory=use_memory,use_text=use_text)
++        if input_type in feature_rep_options.keys():
++            self.feature_net = feature_rep_options[input_type](obs_space,use_memory=use_memory,use_text=use_text, normalize=normalize,
++                                                              hidden_size=feature_hidden_size,input_embedding_size=feature_size)
+         else:
+-            raise ValueError("Incorrect input type name: {}".format(input_type))
++            raise ValueError("Incorrect input type option: {} (should be {})".format(input_type, ', '.join(feature_rep_options.keys())))
+             
+-        self.image_embedding_size = self.feature_in.input_embedding_size
+-        self.embedding_size = self.feature_in.embedding_size
++        self.image_embedding_size = self.feature_net.input_embedding_size
++        self.embedding_size = self.feature_net.embedding_size
++
+         
+         # Define actor's model
+         if type(action_space) == Box:
+-            import sklearn.preprocessing
+             self.n_actions = action_space.shape[0]
+-            self.actor = ContinuousActor(self.embedding_size,self.n_actions)
++            self.actor = ContinuousActor(self.embedding_size,self.n_actions,hidden_size=actor_hidden_size)
+             self.continuous_action = True
+-            state_space_samples = np.array([obs_space_sampler.sample() for x in range(10000)])
+-            scaler = sklearn.preprocessing.StandardScaler()
+-            scaler.fit(state_space_samples)
+-            self.scaler = scaler
+         elif type(action_space) == Discrete:
+             self.n_actions = action_space.n
+-            self.actor = DiscreteActor(self.embedding_size,self.n_actions)
+-            self.continuous_action = False
+-        elif type(action_space) == SSPDiscrete:
+-            self.n_actions = action_space.shape_out
+-            self.actor = SPActor(self.embedding_size,self.n_actions, action_space)
++            self.actor = DiscreteActor(self.embedding_size,self.n_actions,hidden_size=actor_hidden_size)
+             self.continuous_action = False
++        else:
++            raise ValueError("Unsupported action space")
++           
++        # elif type(action_space) == SSPDiscrete:
++        #     self.n_actions = action_space.shape_out
++        #     self.actor = SPActor(self.embedding_size,self.n_actions, action_space)
++        #     self.continuous_action = False
+ 
+         
+         # Define critic's model
+-        self.critic = nn.Sequential(
+-            nn.Linear(self.embedding_size, 64),
+-            nn.Tanh(),
+-            nn.Linear(64, 1)
+-        )
+-
+-        # Initialize parameters correctly
+-        self.apply(init_params)
++        self.critic = mlp(self.embedding_size, critic_hidden_size,  "irelu", 1)
++       
++        # Initialize parameters 
++        self.apply(weight_init)
++        
+ 
+     @property
+     def memory_size(self):
+@@ -86,12 +71,9 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
+         return self.image_embedding_size
+ 
+     def forward(self, obs, memory):
+-        embedding, memory,_ = self.feature_in(obs, memory=memory)
+-
++        embedding, memory,_ = self.feature_net(obs, memory=memory)
+         dist = self.actor(embedding)
+-
+-        x = self.critic(embedding)
+-        value = x.squeeze(1)
++        value = self.critic(embedding).squeeze(1)
+ 
+         return dist, value, memory
+ 
+diff --git a/models/model_SR.py b/models/model_SR.py
+deleted file mode 100755
+index 241bea1..0000000
+--- a/models/model_SR.py
++++ /dev/null
+@@ -1,159 +0,0 @@
+-import torch
+-import torch.nn as nn
+-import torch_ac
+-#import torch_rbf as rbf
+-import numpy as np
+-#from utils.ssps import *
+-import gymnasium as gym
+-from gymnasium.spaces import Discrete, Box
+-
+-from .submodels import ImageInput, FlatInput, SSPInput,  IdentityInput, ContinuousActor, DiscreteActor, SPActor
+-from .submodels import ImageReconstruction, FlatReconstruction, Curiosity, IdentityOutput
+-import sys,os
+-sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
+-from spaces import SSPBox, SSPDiscrete
+-
+-# Function from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr/blob/master/model.py
+-def init_params(m):
+-    classname = m.__class__.__name__
+-    if classname.find("Linear") != -1:
+-        m.weight.data.normal_(0, 1)
+-        m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
+-        if m.bias is not None:
+-            m.bias.data.fill_(0)
+-            #m.bias.data.normal_(0,1)
+-
+-def init_params2(m):
+-    classname = m.__class__.__name__
+-    if classname.find("Linear") != -1:
+-        m.weight.data.fill_(0)
+-        #m.weight.data.normal_(0, 1)
+-        #m.weight.data *= 1 / torch.sqrt(m.weight.data.pow(2).sum(1, keepdim=True))
+-        if m.bias is not None:
+-           # m.bias.data.fill_(0)
+-            m.bias.data.normal_(0,1)
+-            m.bias.data *= 1 / torch.sqrt(m.bias.data.pow(2).sum())
+-
+-class SRModel(nn.Module, torch_ac.RecurrentACModel):
+-    def __init__(self, obs_space, action_space, use_memory=False, use_text=False,
+-                 input_type="image", feature_learn="curiosity",obs_space_sampler=None):
+-        super().__init__()
+-        
+-        
+-        # Decide which components are enabled
+-        self.use_text = use_text
+-        self.use_memory = use_memory
+-        
+-        self.reward_clip_min = 1e-5
+-        self.reward_clip_max = 1e5
+-        
+-        # Form of input to model and the method for learning features
+-        self.input_type = input_type
+-        self.feature_learn = feature_learn
+-
+-        if input_type == "image":
+-            self.feature_in = ImageInput(obs_space,use_memory=use_memory,use_text=use_text)
+-        elif input_type=="flat":
+-            self.feature_in = FlatInput(obs_space,use_memory=use_memory,use_text=use_text)
+-        elif input_type=="ssp":
+-            self.feature_in = SSPInput(obs_space,use_memory=use_memory,use_text=use_text)
+-        elif input_type=="none":
+-            self.feature_in = IdentityInput(obs_space,use_memory=use_memory,use_text=use_text)
+-        else:
+-            raise ValueError("Incorrect input type name: {}".format(input_type))
+-            
+-        self.image_embedding_size = self.feature_in.input_embedding_size
+-        self.embedding_size = self.feature_in.embedding_size
+-        self.goal_embedding_size = self.feature_in.other.text_embedding_size
+-        
+-        # Define actor's model
+-        if type(action_space) == Box:
+-            import sklearn.preprocessing
+-            self.n_actions = action_space.shape[0]
+-            self.actor = ContinuousActor(self.embedding_size,self.n_actions)
+-            self.continuous_action = True
+-            state_space_samples = np.array([obs_space_sampler.sample() for x in range(1000)])
+-            scaler = sklearn.preprocessing.StandardScaler()
+-            scaler.fit(state_space_samples)
+-            self.scaler = scaler
+-        elif type(action_space) == Discrete:
+-            self.n_actions = action_space.n
+-            self.actor = DiscreteActor(self.embedding_size,self.n_actions)
+-            self.continuous_action = False
+-        elif type(action_space) == SSPDiscrete:
+-            self.n_actions = action_space.shape_out
+-            self.actor = SPActor(self.embedding_size,self.n_actions,action_space)
+-            self.continuous_action = False
+-
+-            
+-        if feature_learn=="reconstruction" and input_type=="image":
+-            self.feature_out = ImageReconstruction()
+-        elif feature_learn=="reconstruction" and input_type=="flat":
+-            self.feature_out = FlatReconstruction(obs_space["image"].shape[0])
+-        elif feature_learn=="curiosity":
+-            self.feature_out = Curiosity(self.embedding_size,self.n_actions)
+-        else:
+-            self.feature_out = IdentityOutput()
+-        
+-        
+-        # Define SR model
+-        if input_type.startswith('ssp'):
+-            self.SR = nn.Sequential(
+-                nn.Linear(self.embedding_size, 2*self.embedding_size),
+-                nn.Tanh(),
+-                nn.Linear(2*self.embedding_size, self.embedding_size),
+-                nn.Tanh()
+-            )
+-        else:
+-            self.SR = nn.Sequential(
+-            nn.Linear(self.embedding_size, 2*self.embedding_size),
+-            nn.Tanh(),
+-            nn.Linear(2*self.embedding_size, self.embedding_size)
+-        )
+-        
+-        #nn.Linear(self.embedding_size, self.embedding_size)
+-        
+-
+-        # Initialize parameters correctly
+-        self.reward = nn.Linear(self.embedding_size, 1, bias=False)
+-        self.apply(init_params)
+-        
+-        # 
+-        # self.reward = nn.Linear(self.goal_embedding_size, self.embedding_size)
+-        # self.reward = torch.nn.Parameter(torch.zeros(self.embedding_size,1))
+-        # self.reward.apply(init_params2)
+-        
+-
+-
+- 
+-
+-    def forward(self, obs, action=None, next_obs=None, memory=None):
+-        embedding, memory, embed_txt = self.feature_in(obs, memory=memory)
+-        if (action is not None) and (next_obs is not None):
+-             next_embedding, _, _ = self.feature_in(next_obs, memory=memory)
+-             predictions = self.feature_out(embedding, next_embedding = next_embedding, action=action, next_obs=next_obs, memory=memory)
+-        else:
+-            predictions = None
+-        
+-        dist = self.actor(embedding)
+-        successor = self.SR(embedding) + embedding # skip connection
+-        # reward = self.reward(embedding).squeeze() 
+-        # reward_vector = self.reward(embed_txt)
+-        reward_vector = self.reward.weight/ torch.clamp(torch.norm(self.reward.weight), self.reward_clip_min,self.reward_clip_max)
+-        reward = torch.sum(reward_vector * embedding,1)
+-        
+-        # value = self.reward(successor).squeeze().detach()
+-        value = torch.sum(reward_vector * successor,1).detach()
+-
+-        return dist, value, embedding, predictions, successor, reward, memory
+-
+-
+-    @property
+-    def memory_size(self):
+-        return 2*self.semi_memory_size
+-
+-    @property
+-    def semi_memory_size(self):
+-        return self.image_embedding_size 
+-
+-
+diff --git a/models/submodels.py b/models/submodels.py
+deleted file mode 100644
+index 30dcea0..0000000
+--- a/models/submodels.py
++++ /dev/null
+@@ -1,327 +0,0 @@
+-import torch
+-import torch.nn as nn
+-import torch.nn.functional as F
+-from torch.distributions.categorical import Categorical
+-import numpy as np
+-import sys,os
+-sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
+-from spaces import HexagonalSSPSpace, RandomSSPSpace
+-from distributions import SPDistribution
+-
+-
+-### Modules for getting feature representation from raw input
+-
+-## Add-ons that use memory (LSTMs) and text input
+-class InputModule(nn.Module):
+-    def __init__(self, obs_space, input_embedding_size, use_memory, use_text):
+-        super(InputModule, self).__init__()
+-        self.use_text = use_text
+-        self.use_memory = use_memory
+-        self.input_embedding_size = input_embedding_size
+-        
+-        # Define memory
+-        if self.use_memory:
+-            self.memory_rnn = nn.LSTMCell(self.input_embedding_size, self.input_embedding_size)
+-
+-        # Define text embedding
+-        if self.use_text:
+-            self.word_embedding_size = 32
+-            self.word_embedding = nn.Embedding(obs_space["text"], self.word_embedding_size)
+-            self.text_embedding_size = 128
+-            self.text_rnn = nn.GRU(self.word_embedding_size, self.text_embedding_size, batch_first=True)
+-        else:
+-            self.text_embedding_size = 128
+-        # Resize image embedding
+-        self.embedding_size = self.input_embedding_size
+-        if self.use_text:
+-            self.embedding_size += self.text_embedding_size
+-
+-        
+-    
+-    def _get_embed_text(self, text):
+-        _, hidden = self.text_rnn(self.word_embedding(text))
+-        return hidden[-1]
+-        
+-    @property
+-    def semi_memory_size(self):
+-        return self.input_embedding_size
+-        
+-    def forward(self, obs, x, memory=None):
+-        if self.use_memory & (memory is not None):
+-            hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
+-            hidden = self.memory_rnn(x, hidden)
+-            embedding = hidden[0]
+-            memory = torch.cat(hidden, dim=1)
+-        else:
+-            embedding = x
+-
+-        if self.use_text:
+-            embed_text = self._get_embed_text(obs.text)
+-            embedding = torch.cat((embedding, embed_text), dim=1)
+-        else:
+-            embed_text = torch.zeros((len(obs),self.text_embedding_size)).to(embedding.device)
+-        
+-        return embedding, memory, embed_text
+-    
+-## Features from image data 
+-class ImageInput(nn.Module):
+-    def __init__(self, obs_space, use_memory, use_text):
+-        super(ImageInput, self).__init__()
+-        self.use_text = use_text
+-        self.use_memory = use_memory
+-        n = obs_space["image"][0]
+-        m = obs_space["image"][1]
+-        
+-        if n<10:
+-            self.input_embedding_size = 64
+-            self.conv_output_size = ((n-1)//2-2)*((m-1)//2-2)*64
+-            self.image_conv = nn.Sequential(
+-                nn.Conv2d(3, 16, (2, 2)),
+-                nn.ReLU(),
+-                nn.MaxPool2d((2, 2)),
+-                nn.Conv2d(16, 32, (2, 2)),
+-                nn.ReLU(),
+-                nn.Conv2d(32, 64, (2, 2)),
+-                nn.Tanh()
+-            )
+-            self.fc = nn.Sequential(
+-            )
+-        else:
+-            self.input_embedding_size = 256
+-            self.conv_output_size = (((n - 5)//2 -1)//2 -3)*(((m - 5)//2 -1)//2 -3)*64
+-            self.image_conv = nn.Sequential(
+-                nn.Conv2d(3, 16, (5,5), stride=2),
+-                nn.ReLU(),
+-                nn.MaxPool2d((2, 2), stride=2),
+-                nn.Conv2d(16, 32, (4,4)),
+-                nn.ReLU(),
+-                nn.Conv2d(32, 64, (2, 2)),
+-                nn.Tanh()
+-            )
+-            self.fc = nn.Sequential(
+-                nn.Linear(self.conv_output_size, self.input_embedding_size),  
+-                nn.Tanh()
+-            )
+-        self.other = InputModule(obs_space, self.input_embedding_size, use_memory=use_memory, use_text=use_text )
+-        self.embedding_size = self.other.embedding_size
+-        
+-    def forward(self, obs, memory):
+-        x = obs.image.transpose(1, 3).transpose(2, 3)
+-        x = self.image_conv(x)
+-        x = x.reshape(x.shape[0], -1)
+-        x = self.fc(x)
+-        embedding, memory, embed_txt = self.other(obs, x, memory)
+-        return embedding, memory, embed_txt
+-    
+-   
+-## Features from flat input 
+-class FlatInput(nn.Module):
+-    def __init__(self, obs_space,use_memory,  use_text, input_embedding_size=10, hidden_size=256):
+-        super(FlatInput, self).__init__()
+-        if type(obs_space["image"]) is int:
+-            self.input_dim = obs_space["image"]
+-        else:
+-            self.input_dim = obs_space["image"][0]
+-            
+-        self.input_embedding_size = input_embedding_size
+-        self.hidden_size = hidden_size
+-        self.layers = nn.Sequential(
+-            nn.Linear(self.input_dim, self.hidden_size),
+-            nn.Tanh(),
+-            nn.Linear(self.hidden_size, self.input_embedding_size),
+-        )
+-        self.other = InputModule(obs_space, self.input_embedding_size, 
+-                                 use_text=use_text, use_memory=use_memory)
+-        self.embedding_size = self.other.embedding_size
+-        
+-    def forward(self, obs, memory):
+-        x = obs.image
+-        x = self.layers(x)
+-        embedding, memory, embed_txt = self.other(obs, x, memory)
+-        return embedding, memory, embed_txt
+-   
+-## Construct SSP features from input with trainable ls  
+-class SSPInput(nn.Module):
+-    def __init__(self, obs_space,use_memory,  use_text, input_embedding_size=151, basis_type='hex'):
+-        super(SSPInput, self).__init__()
+-        if type(obs_space["image"]) is int:
+-            self.input_dim = obs_space["image"]
+-        else:
+-            self.input_dim = obs_space["image"][0]
+-            
+-        if basis_type=='hex':
+-            ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size)
+-        elif basis_type=='rand':
+-            ssp_space = RandomSSPSpace(self.input_dim, input_embedding_size)
+-        elif basis_type=='learn':
+-            raise Exception("Learning the full phase matrix of the SSP encosing is not yet implemented") 
+-        self.input_embedding_size = ssp_space.ssp_dim
+-        
+-        self.phase_matrix = torch.Tensor(ssp_space.phase_matrix)
+-        self.length_scale = torch.nn.Parameter(torch.ones(self.input_dim), requires_grad=True)
+-        
+-        self.other = InputModule(obs_space, self.input_embedding_size, 
+-                                 use_text=use_text, use_memory=use_memory)
+-        self.embedding_size = self.other.embedding_size
+-        
+-    def forward(self, obs, memory):
+-        x = obs.image
+-        ls_mat = torch.atleast_2d(torch.diag(1/self.length_scale))
+-        x = (self.phase_matrix.to(x.device) @ (x @ ls_mat).T).type(torch.complex64) # fix .to(x.device)
+-        x = torch.fft.ifft( torch.exp( 1.j * x), axis=0 ).real.T
+-        embedding, memory, embed_txt = self.other(obs, x, memory)
+-        return embedding, memory, embed_txt
+-    
+-## Features are the input
+-class IdentityInput(nn.Module):
+-    def __init__(self, obs_space, use_memory,  use_text):
+-        super(IdentityInput, self).__init__()
+-        self.input_embedding_size =  obs_space["image"]
+-        self.other = InputModule(obs_space, self.input_embedding_size, 
+-                                 use_text=use_text, use_memory=use_memory)
+-        self.embedding_size = self.other.embedding_size
+-        
+-    def forward(self, obs, memory):
+-        x = obs.image
+-        embedding, memory, embed_txt = self.other(obs, x, memory)
+-        return embedding, memory, embed_txt
+- 
+-### Modules for getting predictions used for feature learning
+-
+-## Auto encoder type
+-class ImageReconstruction(nn.Module):
+-    def __init__(self):
+-        super(ImageReconstruction, self).__init__()
+-        self.decoder = nn.Sequential(
+-            nn.ConvTranspose2d(64, 32, (2, 2)),
+-            nn.ReLU(),
+-            nn.ConvTranspose2d(32, 16, (2, 2)),
+-            nn.ReLU(),
+-            nn.ConvTranspose2d(16, 16, (4, 4)),
+-            nn.ReLU(),
+-            nn.ConvTranspose2d(16, 3, (2, 2))
+-        )
+-        
+-    def forward(self, embedding, **kwargs):
+-        obs_pred = self.decoder(embedding.reshape(-1,64,1,1))
+-        obs_pred = obs_pred.transpose(3, 2).transpose(1, 3)
+-        return obs_pred
+-    
+-    
+-class FlatReconstruction(nn.Module):
+-    def __init__(self, output_size):
+-        super(ImageReconstruction, self).__init__()
+-        self.decoder = nn.Sequential(
+-            nn.Linear(output_size, output_size),
+-            nn.Tanh(),
+-            nn.Linear(output_size, output_size)
+-        )
+-        
+-    def forward(self, embedding, **kwargs):
+-        obs_pred = self.decoder(embedding)
+-        return obs_pred
+-    
+-class IdentityOutput(nn.Module):
+-    def __init__(self):
+-        super(IdentityOutput, self).__init__()
+-        
+-    def forward(self, embedding, **kwargs):
+-        return embedding
+-    
+-## curiosity type
+-class Curiosity(nn.Module):
+-    def __init__(self,embedding_size,n_actions):
+-        super(Curiosity, self).__init__()
+-        self.embedding_size = embedding_size
+-        self.n_actions = n_actions
+-        self.forward_model = nn.Sequential(
+-            nn.Linear(self.embedding_size + self.n_actions, 256),
+-            nn.ReLU(),
+-            nn.Linear(256, self.embedding_size),
+-            nn.Tanh()
+-            )
+-        
+-        self.inverse_model = nn.Sequential(
+-            nn.Linear(self.embedding_size*2, 64),
+-            nn.ReLU(),
+-            nn.Linear(64, self.n_actions),
+-            nn.LogSigmoid()
+-            )
+-        
+-    def forward(self, embedding, next_embedding, action, next_obs, memory):
+-        if self.n_actions > 1:
+-            action = F.one_hot(action.long(), num_classes=self.n_actions).float()
+-        else:
+-            action = action.float().reshape(-1,1)
+-        forward_input = torch.cat((embedding, action), 1)
+-        next_obs_pred = self.forward_model(forward_input)
+-        
+-        inverse_input = torch.cat((embedding, next_embedding), 1)
+-        action_pred = self.inverse_model(inverse_input)
+-
+-        return [next_embedding, next_obs_pred, action_pred]
+-    
+-
+-## Actor Modules
+-class DiscreteActor(nn.Module):
+-    def __init__(self,embedding_size, n_actions, hidden_size=64):
+-        super(DiscreteActor, self).__init__()
+-        self.n_actions = n_actions
+-        self.embedding_size = embedding_size
+-        self.actor_layers = nn.Sequential(
+-            nn.Linear(self.embedding_size, hidden_size),
+-            nn.Tanh(),
+-            nn.Linear(hidden_size, self.n_actions)
+-        )
+-        
+-        
+-    def forward(self, embedding):
+-        x = self.actor_layers(embedding)
+-        dist = Categorical(logits=F.log_softmax(x, dim=1))
+-        return dist
+-    
+-class ContinuousActor(nn.Module):
+-    def __init__(self,embedding_size, n_actions, hidden_size=64):
+-        super(ContinuousActor, self).__init__()
+-        self.embedding_size = embedding_size
+-        self.n_actions = n_actions
+-        self.actor_layers = nn.Sequential(
+-            nn.Linear(self.embedding_size, hidden_size),
+-            nn.ReLU()
+-        )
+-        
+-        self.mean = nn.Sequential(
+-            nn.Linear(hidden_size, self.n_actions),
+-            nn.Tanh(), # actions must be normlized
+-        )
+-        
+-        self.var = nn.Sequential(
+-            nn.Linear(hidden_size, self.n_actions),
+-            nn.Sigmoid(),
+-            
+-        )
+-        
+-    def forward(self, embedding):
+-        x = self.actor_layers(embedding)
+-        mean = self.mean(x)
+-        scale = self.var(x) + 1e-16
+-        dist = torch.distributions.normal.Normal(mean, scale)
+-        return dist
+-    
+-class SPActor(nn.Module):
+-    def __init__(self,embedding_size, n_actions, action_space, hidden_size=64):
+-        super(SPActor, self).__init__()
+-        self.embedding_size = embedding_size
+-        self.action_space=action_space
+-        self.n_actions = n_actions
+-        self.actor_layers = nn.Sequential(
+-            nn.Linear(self.embedding_size, hidden_size),
+-            nn.ReLU(),
+-            nn.Linear(hidden_size, self.n_actions),
+-            nn.Tanh(),
+-        )
+-          
+-    def forward(self, embedding):
+-        x = self.actor_layers(embedding)
+-        dist = SPDistribution(x,self.action_space)
+-        return dist
+\ No newline at end of file
+diff --git a/run_and_plot_8x8.py b/run_and_plot_8x8.py
+deleted file mode 100644
+index 0897645..0000000
+--- a/run_and_plot_8x8.py
++++ /dev/null
+@@ -1,52 +0,0 @@
+-import os
+-import utils
+-
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-
+-models = ['plot_8x8_ppo_image', 'plot_8x8_ppo_ssp','plot_8x8_a2c_image', 
+-          'plot_8x8_a2c_ssp', 'plot_8x8_sr_image', 'plot_8x8_sr_ssp',
+-          'plot_8x8_sr-ppo_image', 'plot_8x8_sr-ppo_ssp']
+-
+-for model_name in models:
+-    model_dir = utils.get_model_dir(model_name)
+-    if os.path.exists(model_dir):
+-        for f in os.listdir(model_dir):
+-            os.remove(os.path.join(model_dir, f))
+-        os.rmdir(model_dir)
+-                
+-for i,model_name in enumerate(models):
+-    algo = model_name.split("_")[2]
+-    input_type = model_name.split("_")[3]
+-    if algo=='sr':
+-        other_args = '--entropy-coef 0.01 --entropy-decay 0.9 ' 
+-    else:
+-        other_args = '--entropy-coef 0.0005 '
+-    if input_type=='ssp':
+-        input_type = 'ssp-xy'
+-        feature_learn = 'none'
+-        other_args = other_args + '--ssp-h 1 '
+-    else:
+-        feature_learn = 'curiosity'
+-    os.system("python train.py --algo " + algo + " --input " + input_type +
+-              " --feature-learn " + feature_learn + " --model " + model_name
+-          + " --env MiniGrid-Empty-8x8-v0 --frames 50000 " + other_args)
+-
+-
+-
+-plt.figure(figsize=(7,3))
+-linestys = {'ssp': '-', 'image':'--'}
+-cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-for i,model_name in enumerate(models):
+-    model_dir = utils.get_model_dir(model_name)
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-    input_type = model_name.split("_")[3]
+-    algo = model_name.split("_")[2]
+-    sns.lineplot(x="frames", y='return_mean', label=model_name[9:],
+-                 data=data, alpha=0.8, linestyle=linestys[input_type], color=cols[algo])
+-
+-plt.xlabel("Frames observed")
+-plt.ylabel("Average Return")
+\ No newline at end of file
+diff --git a/run_and_plot_8x8_random.py b/run_and_plot_8x8_random.py
+deleted file mode 100644
+index 210bf25..0000000
+--- a/run_and_plot_8x8_random.py
++++ /dev/null
+@@ -1,52 +0,0 @@
+-import os
+-import utils
+-
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-
+-models = ['plot_8x8rand_ppo_image', 'plot_8x8rand_ppo_ssp','plot_8x8rand_a2c_image', 
+-          'plot_8x8rand_a2c_ssp', 'plot_8x8rand_sr_image', 'plot_8x8rand_sr_ssp',
+-          'plot_8x8rand_sr-ppo_image', 'plot_8x8rand_sr-ppo_ssp']
+-
+-for model_name in models:
+-    model_dir = utils.get_model_dir(model_name)
+-    if os.path.exists(model_dir):
+-        for f in os.listdir(model_dir):
+-            os.remove(os.path.join(model_dir, f))
+-        os.rmdir(model_dir)
+-                
+-for i,model_name in enumerate(models):
+-    algo = model_name.split("_")[2]
+-    input_type = model_name.split("_")[3]
+-    if algo=='sr':
+-        other_args = '--entropy-coef 0.01 --entropy-decay 0.9 ' 
+-    else:
+-        other_args = '--entropy-coef 0.0005 '
+-    if input_type=='ssp':
+-        input_type = 'ssp-xy'
+-        feature_learn = 'none'
+-        other_args = other_args + '--ssp-h 1 '
+-    else:
+-        feature_learn = 'curiosity'
+-    os.system("python train.py --algo " + algo + " --input " + input_type +
+-              " --feature-learn " + feature_learn + " --model " + model_name
+-          + " --env MiniGrid-Empty-Random-8x8-v0 --frames 50000 " + other_args)
+-
+-
+-
+-plt.figure(figsize=(7,3))
+-linestys = {'ssp': '-', 'image':'--'}
+-cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-for i,model_name in enumerate(models):
+-    model_dir = utils.get_model_dir(model_name)
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-    input_type = model_name.split("_")[3]
+-    algo = model_name.split("_")[2]
+-    sns.lineplot(x="frames", y='return_mean', label=model_name[13:],
+-                 data=data, alpha=0.8, linestyle=linestys[input_type], color=cols[algo])
+-
+-plt.xlabel("Frames observed")
+-plt.ylabel("Average Return")
+\ No newline at end of file
+diff --git a/run_and_plot_babyai.py b/run_and_plot_babyai.py
+deleted file mode 100644
+index f352436..0000000
+--- a/run_and_plot_babyai.py
++++ /dev/null
+@@ -1,72 +0,0 @@
+-import os
+-import utils
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-DoorKey-8x8-v0 --frames 100000 --wrapper ssp-view --input flat --plot True --procs 1 --frames-per-proc 100 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-
+-
+-
+-envs = [ 'BabyAI-GoToRedBallGrey-v0','BabyAI-GoToRedBall-v0',
+-        "BabyAI-GoToObjS6-v0", "BabyAI-GoToLocalS8N7-v0"]
+-n_frames = [100000,100000,
+-            100000,100000]
+-# envs = ['MiniGrid-Empty-8x8-v0', 'MiniGrid-Empty-16x16-v0', 'MiniGrid-FourRooms-v0',
+-#         'MiniWorld-TMazeLeft-v0', 'MiniWorld-YMazeLeft-v0', 
+-#         'MiniWorld-MazeS2-v0', 'MiniWorld-MazeS3-v0', 'MiniWorld-MazeS3Fast-v0']#,
+-      #  'maze-sample-5x5','maze-sample-10x10-v0','maze-sample-100x100-v0']
+-algos = ['a2c']
+-wrappers = ['ssp-lang', 'ssp-view', 'none']
+-
+-all_models = []
+-for i, env in enumerate(envs):
+-    models = []
+-    for algo in algos:
+-
+-        for input_type in wrappers:
+-            if input_type=='none':
+-                in_ty = 'image'
+-                
+-            else:
+-                in_ty = 'flat'
+-                
+-            model_name = env + '_' + algo + '_' + input_type
+-            models.append(model_name)
+-            model_dir = utils.get_model_dir(model_name)
+-            if os.path.exists(model_dir):
+-                for f in os.listdir(model_dir):
+-                    os.remove(os.path.join(model_dir, f))
+-                os.rmdir(model_dir)
+-
+-            os.system("python train.py --algo " + algo + " --wrapper " + input_type +
+-                      " --input " + in_ty + " --model " + model_name
+-                  + " --env  " + env + " --frames " + str(n_frames[i]) + " --procs 1 --frames-per-proc 100 --plot False" )
+-                
+-            
+-    all_models.append(models)
+-
+-for j,env in enumerate(envs):
+-    fig =plt.figure(figsize=(7,3))
+-    linestys = {'ssp': '-', 'image':'--'}
+-    cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-    for i,model_name in enumerate(all_models[j]):
+-        model_dir = utils.get_model_dir(model_name)
+-        data = pd.read_csv(model_dir + "/log.csv")
+-        #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-        data = data[pd.to_numeric(data['return_mean'], errors='coerce').notnull()]
+-        data['return_mean'] = pd.to_numeric(data['return_mean'])
+-        data['frames'] = pd.to_numeric(data['frames'])
+-        input_type = model_name.split("_")[2]
+-        if input_type=='none':
+-            input_type ='image'
+-        algo = model_name.split("_")[1]
+-        sns.lineplot(x="frames", y='return_mean', label=algo.upper() + "-" + input_type,
+-                     data=data, alpha=0.8)#, linestyle=linestys[input_type])#, color=cols[algo])
+-    plt.title(env)
+-    plt.xlabel("Frames observed")
+-    plt.ylabel("Average Return")
+-    plt.legend(loc='lower right', facecolor='white', framealpha=1, frameon = True, edgecolor='none')
+-    utils.save(fig,env + '.pdf')
+-
+-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-LavaCrossingS9N3-v0 --frames 50000 --wrapper none --input image --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+\ No newline at end of file
+diff --git a/run_and_plot_doorkey.py b/run_and_plot_doorkey.py
+deleted file mode 100644
+index 7c1a145..0000000
+--- a/run_and_plot_doorkey.py
++++ /dev/null
+@@ -1,74 +0,0 @@
+-import os
+-import utils
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-DoorKey-8x8-v0 --frames 100000 --wrapper ssp-view --input flat --plot True --procs 1 --frames-per-proc 100 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-
+-
+-
+-envs = [ 'MiniGrid-DoorKey-5x5-v0', 'MiniGrid-DoorKey-6x6-v0', 'MiniGrid-DoorKey-8x8-v0',
+-        'MiniGrid-DoorKey-16x16-v0']
+-n_frames = [50000]*len(envs)
+-# envs = ['MiniGrid-Empty-8x8-v0', 'MiniGrid-Empty-16x16-v0', 'MiniGrid-FourRooms-v0',
+-#         'MiniWorld-TMazeLeft-v0', 'MiniWorld-YMazeLeft-v0', 
+-#         'MiniWorld-MazeS2-v0', 'MiniWorld-MazeS3-v0', 'MiniWorld-MazeS3Fast-v0']#,
+-      #  'maze-sample-5x5','maze-sample-10x10-v0','maze-sample-100x100-v0']
+-algos = ['a2c']
+-wrappers = ['none', 'ssp-view']
+-
+-for i, env in enumerate(envs):
+-    models = []
+-    for algo in algos:
+-
+-        for input_type in wrappers:
+-            if input_type=='none':
+-                in_ty = 'image'
+-                
+-            else:
+-                in_ty = 'flat'
+-                
+-            model_name = 'MiniGrid-DoorKey2' + '_' + algo + '_' + input_type
+-            models.append(model_name)
+-            if i==0:
+-                model_dir = utils.get_model_dir(model_name)
+-                if os.path.exists(model_dir):
+-                    for f in os.listdir(model_dir):
+-                        os.remove(os.path.join(model_dir, f))
+-                    os.rmdir(model_dir)
+-                load = False
+-            else:
+-                load = True
+-
+-            os.system("python train.py --algo " + algo + " --wrapper " + input_type +
+-                      " --input " + in_ty + " --model " + model_name
+-                  + " --env  " + env + " --frames " + str(n_frames[i]*(i+1)) +
+-                  " --procs 1 --frames-per-proc 100 --plot False --entropy-coef 0.001 --load-optimizer-state " + str(load) )
+-                
+-            
+-
+-
+-fig =plt.figure(figsize=(7,3))
+-linestys = {'ssp': '-', 'image':'--'}
+-cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-for i,model_name in enumerate(models):
+-    model_dir = utils.get_model_dir(model_name)
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-    data = data[pd.to_numeric(data['return_mean'], errors='coerce').notnull()]
+-    data['return_mean'] = pd.to_numeric(data['return_mean'])
+-    data['frames'] = pd.to_numeric(data['frames'])
+-    input_type = model_name.split("_")[2]
+-    if input_type=='none':
+-        input_type ='image'
+-    algo = model_name.split("_")[1]
+-    sns.lineplot(x="frames", y='return_mean', label=algo.upper() + "-" + input_type,
+-                 data=data, alpha=0.8)#, linestyle=linestys[input_type])#, color=cols[algo])
+-for i in range(len(envs)):
+-    plt.axvline(x = n_frames[i]*(i+1), color = 'k')
+-plt.title("MiniGrid-DoorKey: 5x5, 6x6, 8x8, 16x16")
+-plt.xlabel("Frames observed")
+-plt.ylabel("Average Return")
+-plt.legend(loc='lower right', facecolor='white', framealpha=1, frameon = True, edgecolor='none')
+-utils.save(fig,env + '.pdf')
+\ No newline at end of file
+diff --git a/run_and_plot_dyn_obs.py b/run_and_plot_dyn_obs.py
+deleted file mode 100644
+index 9f1b118..0000000
+--- a/run_and_plot_dyn_obs.py
++++ /dev/null
+@@ -1,73 +0,0 @@
+-import os
+-import utils
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-DoorKey-8x8-v0 --frames 100000 --wrapper ssp-view --input flat --plot True --procs 1 --frames-per-proc 100 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-
+-
+-
+-envs = [ 'MiniGrid-Empty-5x5-v0', 'MiniGrid-Dynamic-Obstacles-5x5-v0']
+-n_frames = [50000]*len(envs)
+-# envs = ['MiniGrid-Empty-8x8-v0', 'MiniGrid-Empty-16x16-v0', 'MiniGrid-FourRooms-v0',
+-#         'MiniWorld-TMazeLeft-v0', 'MiniWorld-YMazeLeft-v0', 
+-#         'MiniWorld-MazeS2-v0', 'MiniWorld-MazeS3-v0', 'MiniWorld-MazeS3Fast-v0']#,
+-      #  'maze-sample-5x5','maze-sample-10x10-v0','maze-sample-100x100-v0']
+-algos = ['a2c']
+-wrappers = ['none', 'ssp-view']
+-
+-for i, env in enumerate(envs):
+-    models = []
+-    for algo in algos:
+-
+-        for input_type in wrappers:
+-            if input_type=='none':
+-                in_ty = 'image'
+-                
+-            else:
+-                in_ty = 'flat'
+-                
+-            model_name = 'MiniGrid-DynObs' + '_' + algo + '_' + input_type
+-            models.append(model_name)
+-            if i==0:
+-                model_dir = utils.get_model_dir(model_name)
+-                if os.path.exists(model_dir):
+-                    for f in os.listdir(model_dir):
+-                        os.remove(os.path.join(model_dir, f))
+-                    os.rmdir(model_dir)
+-                load = False
+-            else:
+-                load = True
+-
+-            os.system("python train.py --algo " + algo + " --wrapper " + input_type +
+-                      " --input " + in_ty + " --model " + model_name
+-                  + " --env  " + env + " --frames " + str(n_frames[i]*(i+1)) +
+-                  " --procs 1 --frames-per-proc 100 --plot False --entropy-coef 0.001 --load-optimizer-state " + str(load) )
+-                
+-            
+-
+-
+-fig =plt.figure(figsize=(7,3))
+-linestys = {'ssp': '-', 'image':'--'}
+-cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-for i,model_name in enumerate(models):
+-    model_dir = utils.get_model_dir(model_name)
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-    data = data[pd.to_numeric(data['return_mean'], errors='coerce').notnull()]
+-    data['return_mean'] = pd.to_numeric(data['return_mean'])
+-    data['frames'] = pd.to_numeric(data['frames'])
+-    input_type = model_name.split("_")[2]
+-    if input_type=='none':
+-        input_type ='image'
+-    algo = model_name.split("_")[1]
+-    sns.lineplot(x="frames", y='return_mean', label=algo.upper() + "-" + input_type,
+-                 data=data, alpha=0.8)#, linestyle=linestys[input_type])#, color=cols[algo])
+-for i in range(len(envs)):
+-    plt.axvline(x = n_frames[i]*(i+1), color = 'k')
+-plt.title("MiniGrid-DoorKey: 5x5, 6x6, 8x8, 16x16")
+-plt.xlabel("Frames observed")
+-plt.ylabel("Average Return")
+-plt.legend(loc='lower right', facecolor='white', framealpha=1, frameon = True, edgecolor='none')
+-utils.save(fig,'MiniGrid-DynObs' + '.pdf')
+\ No newline at end of file
+diff --git a/run_and_plot_maze-sample-5x5.py b/run_and_plot_maze-sample-5x5.py
+deleted file mode 100644
+index 2dbbfb5..0000000
+--- a/run_and_plot_maze-sample-5x5.py
++++ /dev/null
+@@ -1,56 +0,0 @@
+-import os
+-import utils
+-
+-
+-models = ['plot_5x5maze_ppo_flat', 'plot_5x5maze_ppo_ssp','plot_5x5maze_a2c_flat', 'plot_5x5maze_a2c_ssp',
+-          'plot_5x5maze_sr_flat', 'plot_5x5maze_sr_ssp']
+-
+-
+-models = ['plot_maze_ppo_flat', 'plot_maze_ppo_ssp',
+-          'plot_maze_a2c_flat',  'plot_maze_a2c_ssp', 
+-          'plot_maze_sr_flat', 'plot_maze_sr_ssp',
+-          'plot_maze_sr-ppo_flat', 'plot_maze_sr-ppo_ssp']
+-
+-for model_name in models:
+-    model_dir = utils.get_model_dir(model_name)
+-    if os.path.exists(model_dir):
+-        for f in os.listdir(model_dir):
+-            os.remove(os.path.join(model_dir, f))
+-        os.rmdir(model_dir)
+-                
+-for i,model_name in enumerate(models):
+-    algo = model_name.split("_")[2]
+-    input_type = model_name.split("_")[3]
+-    if algo=='sr':
+-        other_args = ' --entropy-coef 0.1 --entropy-decay 0.95 ' 
+-    else:
+-        other_args = '--entropy-coef 0.0005 '
+-    if input_type=='ssp':
+-        input_type = 'ssp-xy'
+-        feature_learn = 'none'
+-        other_args = other_args + '--ssp-h 0.6 '
+-    else:
+-        feature_learn = 'curiosity'
+-    os.system("python train.py --algo " + algo + " --input " + input_type +
+-              " --feature-learn " + feature_learn + " --model " + model_name
+-          + " --env maze-sample-5x5 --frames 50000 " + other_args)
+-
+-
+-
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-
+-plt.figure()
+-plt.title('maze-sample-5x5')
+-linestys = ['-','--','-','--','-','--','-','--']
+-for i,model_name in enumerate(models):
+-    model_dir = utils.get_model_dir(model_name)
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-
+-    sns.lineplot(x="frames", y='return_mean', label=model_name[10:], data=data, alpha=0.8, linestyle=linestys[i])
+-plt.legend()
+-plt.xlabel("Frames observed", size=14)
+-plt.ylabel("Average Return", size=14)
+\ No newline at end of file
+diff --git a/run_and_plot_size_trasnfer.py b/run_and_plot_size_trasnfer.py
+deleted file mode 100644
+index dac25fc..0000000
+--- a/run_and_plot_size_trasnfer.py
++++ /dev/null
+@@ -1,59 +0,0 @@
+-import os
+-import utils
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-
+-# models = ['MiniGrid_size_sr_image','MiniGrid_size_sr_ssp']
+-models = ['MiniGrid_size_a2c_image','MiniGrid_size_a2c_ssp','MiniGrid_size_sr_image','MiniGrid_size_sr_ssp']
+-
+-      #    'MiniGrid_size_a2c_ssp','MiniGrid_size_ppo_ssp','MiniGrid_size_sr_ssp']
+-#'MiniGrid_size_ppo_image'
+-for model_name in models:
+-    model_dir = utils.get_model_dir(model_name)
+-    if os.path.exists(model_dir):
+-        for f in os.listdir(model_dir):
+-            os.remove(os.path.join(model_dir, f))
+-        os.rmdir(model_dir)
+-                
+-
+-
+-for i,model_name in enumerate(models):
+-    for i,env in enumerate(["MiniGrid-Empty-6x6-v0", "MiniGrid-Empty-8x8-v0", "MiniGrid-Empty-16x16-v0"]):
+-        algo = model_name.split("_")[2]
+-        input_type = model_name.split("_")[3]
+-        if algo=='sr':
+-            other_args = ' --entropy-coef 0.01 --entropy-decay 0.9 ' 
+-        else:
+-            other_args = ' --entropy-coef 0.0005 '
+-        if input_type=='ssp':
+-            input_type = 'ssp-xy'
+-            feature_learn = 'none'
+-            other_args = other_args + '--ssp-h ' + int(env.split("-")[2].split("x")[0])/6
+-        else:
+-            feature_learn = 'curiosity'
+-        os.system("python train.py --algo " + algo + " --input " + input_type +
+-                  " --feature-learn " + feature_learn + " --model " + model_name
+-              + " --env " + env + " --frames " + str(30000*(i+1)) + other_args)
+-
+-
+-
+-
+-plt.figure(figsize=(7,3))
+-linestys = {'ssp': '-', 'image':'--'}
+-cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-for i,model_name in enumerate(models):
+-    model_dir = utils.get_model_dir(model_name)
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-    data = data[pd.to_numeric(data['return_mean'], errors='coerce').notnull()]
+-    data['return_mean'] = pd.to_numeric(data['return_mean'])
+-    data['frames'] = pd.to_numeric(data['frames'])
+-    input_type = model_name.split("_")[3]
+-    algo = model_name.split("_")[2]
+-    sns.lineplot(x="frames", y='return_mean', label=model_name[14:],
+-                 data=data, alpha=0.8, linestyle=linestys[input_type], color=cols[algo])
+-
+-plt.xlabel("Frames observed")
+-plt.ylabel("Average Return")
+\ No newline at end of file
+diff --git a/run_and_plot_sspview.py b/run_and_plot_sspview.py
+deleted file mode 100644
+index 25943fe..0000000
+--- a/run_and_plot_sspview.py
++++ /dev/null
+@@ -1,84 +0,0 @@
+-import os
+-import utils
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-DoorKey-8x8-v0 --frames 100000 --wrapper ssp-view --input flat --plot True --procs 1 --frames-per-proc 100 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-
+-
+-
+-envs = [ 'BabyAI-GoToRedBallGrey-v0','BabyAI-GoToRedBall-v0',
+-        'MiniGrid-Dynamic-Obstacles-5x5-v0',
+-        'MiniGrid-LavaGapS5-v0','MiniGrid-LavaGapS6-v0',
+-        'MiniGrid-DoorKey-5x5-v0', 'MiniGrid-DoorKey-6x6-v0', 'MiniGrid-DoorKey-8x8-v0',
+-        'MiniGrid-KeyCorridorS3R1-v0', #'MiniGrid-KeyCorridorS3R2-v0', 
+-       'MiniGrid-Unlock-v0']
+-n_frames = [100000,100000,
+-            100000,
+-            50000,100000,
+-            50000,100000,100000,
+-            100000,
+-            100000]
+-# envs = ['MiniGrid-Empty-8x8-v0', 'MiniGrid-Empty-16x16-v0', 'MiniGrid-FourRooms-v0',
+-#         'MiniWorld-TMazeLeft-v0', 'MiniWorld-YMazeLeft-v0', 
+-#         'MiniWorld-MazeS2-v0', 'MiniWorld-MazeS3-v0', 'MiniWorld-MazeS3Fast-v0']#,
+-      #  'maze-sample-5x5','maze-sample-10x10-v0','maze-sample-100x100-v0']
+-algos = ['a2c']
+-wrappers = ['none', 'xy', 'ssp-xy', 'ssp-view']
+-
+-all_models = []
+-for i, env in enumerate(envs):
+-    models = []
+-    for algo in algos:
+-
+-        for input_type in wrappers:
+-            if input_type=='none':
+-                in_ty = 'image'
+-                
+-            else:
+-                in_ty = 'flat'
+-                
+-            model_name = env + '_' + algo + '_' + input_type
+-            models.append(model_name)
+-            model_dir = utils.get_model_dir(model_name)
+-            if os.path.exists(model_dir):
+-                for f in os.listdir(model_dir):
+-                    os.remove(os.path.join(model_dir, f))
+-                os.rmdir(model_dir)
+-
+-            os.system("python train.py --algo " + algo + " --wrapper " + input_type +
+-                      " --input " + in_ty + " --model " + model_name
+-                  + " --env  " + env + " --frames " + str(n_frames[i]) + " --procs 1 --frames-per-proc 100 --plot False" )
+-                
+-            
+-    all_models.append(models)
+-
+-all_models[0] = ['BabyAI-GoToRedBallGrey-v0_a2c_none',
+-  'BabyAI-GoToRedBallGrey-v0_a2c_ssp-view']
+-all_models[1] =  ['BabyAI-GoToRedBall-v0_a2c_none',
+-  'BabyAI-GoToRedBall-v0_a2c_ssp-view']
+-for j,env in enumerate(envs):
+-    fig =plt.figure(figsize=(7,3))
+-    linestys = {'ssp': '-', 'image':'--'}
+-    cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-    for i,model_name in enumerate(all_models[j]):
+-        model_dir = utils.get_model_dir(model_name)
+-        data = pd.read_csv(model_dir + "/log.csv")
+-        #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-        data = data[pd.to_numeric(data['return_mean'], errors='coerce').notnull()]
+-        data['return_mean'] = pd.to_numeric(data['return_mean'])
+-        data['frames'] = pd.to_numeric(data['frames'])
+-        input_type = model_name.split("_")[2]
+-        if input_type=='none':
+-            input_type ='image'
+-        algo = model_name.split("_")[1]
+-        sns.lineplot(x="frames", y='return_mean', label=algo.upper() + "-" + input_type,
+-                     data=data, alpha=0.8)#, linestyle=linestys[input_type])#, color=cols[algo])
+-    plt.title(env)
+-    plt.xlabel("Frames observed")
+-    plt.ylabel("Average Return")
+-    plt.legend(loc='lower right', facecolor='white', framealpha=1, frameon = True, edgecolor='none')
+-    utils.save(fig,env + '.pdf')
+-
+-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-LavaCrossingS9N3-v0 --frames 50000 --wrapper none --input image --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+\ No newline at end of file
+diff --git a/run_andplot_minworld.py b/run_andplot_minworld.py
+deleted file mode 100644
+index 1c8d705..0000000
+--- a/run_andplot_minworld.py
++++ /dev/null
+@@ -1,44 +0,0 @@
+-import os
+-import utils
+-
+-
+-models = ['plot_5x5maze_ppo_image', 'plot_5x5maze_ppo_ssp','plot_5x5maze_a2c_image', 'plot_5x5maze_a2c_ssp',
+-          'plot_5x5maze_sr_image', 'plot_5x5maze_sr_ssp']
+-
+-os.system("python train.py --algo ppo --input flat --feature-learn none --model " + models[0] 
+-          + " --env MiniWorld-MazeS3Fast-v0 --frames 30000 --entropy-coef 0.0005")
+-os.system("python train.py --algo ppo --input ssp-auto  --feature-learn none --model " +models[1] 
+-          + " --env MiniWorld-MazeS3Fast --frames 30000 --ssp-h 1 --entropy-coef 0.0005")
+-os.system("python train.py --algo a2c --input flat --feature-learn none --model " +models[2] 
+-          + " --env MiniWorld-MazeS3Fast --frames 30000 --entropy-coef 0.0005")
+-os.system("python train.py --algo a2c --input ssp-auto  --feature-learn none --model " +models[3] 
+-          + " --env MiniWorld-MazeS3Fast --frames 30000 --ssp-h 1 --entropy-coef 0.0005")
+-os.system("python train.py --algo sr --input flat --feature-learn curiosity --model " +models[4] 
+-          + " --env MiniWorld-MazeS3Fast --frames 30000  --entropy-coef 0.01 --entropy-decay 0.9")
+-os.system("python train.py --algo sr --input ssp-auto --feature-learn none --model " +models[5] 
+-          + " --env MiniWorld-MazeS3Fast --frames 30000  --ssp-h 1 --entropy-coef 0.01 --entropy-decay 0.9")
+-
+-
+-# runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniWorld-MazeS3Fast-v0 --frames 30000 --input ssp-miniworld-xy --procs 1 --feature-learn none --lr 0.02', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-# runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniWorld-MazeS3Fast-v0 --frames 30000 --input ssp-miniworld-xy --procs 1 --feature-learn none --lr 0.005', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-# runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniWorld-MazeS3Fast-v0 --frames 30000 --input ssp-miniworld-xy --procs 1 --feature-learn none --lr 0.0005', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-
+-
+-
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-
+-plt.figure()
+-plt.title('maze-sample-5x5')
+-linestys = ['-','--','-','--','-','--','-','--']
+-for i,model_name in enumerate(models):
+-    model_dir = utils.get_model_dir(model_name)
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-
+-    sns.lineplot(x="frames", y='return_mean', label=model_name[9:], data=data, alpha=0.8, linestyle=linestys[i])
+-
+-plt.xlabel("Frames observed", size=14)
+-plt.ylabel("Average Return", size=14)
+\ No newline at end of file
+diff --git a/spaces/ssp_box.py b/spaces/ssp_box.py
+index 5401ef9..c9a92b6 100644
+--- a/spaces/ssp_box.py
++++ b/spaces/ssp_box.py
+@@ -20,6 +20,7 @@ class SSPBox(Space[np.ndarray]):
+         seed: Optional[Union[int, np.random.Generator]] = None,
+         ssp_space = None,
+         decoder_method: Optional[str] = 'network-optim',
++        length_scale=None,
+         **kwargs
+     ):
+         r"""Constructor of :class:`SSPBox`.
+@@ -75,7 +76,7 @@ class SSPBox(Space[np.ndarray]):
+ 
+         low = _broadcast(low, dtype, shape_in, inf_sign="-")  # type: ignore
+         high = _broadcast(high, dtype, shape_in, inf_sign="+")  # type: ignore
+-
++        
+         assert isinstance(low, np.ndarray)
+         assert (
+             low.shape == shape_in
+@@ -99,17 +100,24 @@ class SSPBox(Space[np.ndarray]):
+         self.low_repr = _short_repr(self.low)
+         self.high_repr = _short_repr(self.high)
+         
++        # From Kathyrn
++        if length_scale is None:
++            length_scale = np.clip( ( np.abs(np.atleast_2d( high - low )) ).T,a_min = 1e-8, a_max = 1e8) / 10.
++        #
++        
+         if (ssp_space is None) or (ssp_space=='hex'):
+             self.ssp_space = HexagonalSSPSpace(
+                                 self.shape_in[0],
+                                 ssp_dim=self.shape_out, 
+                                 domain_bounds=self.bounds, seed=seed,
++                                length_scale=length_scale,
+                                 **kwargs)
+         elif (ssp_space=='rand'):
+             self.ssp_space = RandomSSPSpace(
+                                 self.shape_in[0],
+                                 ssp_dim=self.shape_out, 
+                                 domain_bounds=self.bounds, seed=seed,
++                                length_scale=length_scale,
+                                 **kwargs)
+         else:
+             self.ssp_space = ssp_space
+diff --git a/ssp_vs_non_results.py b/ssp_vs_non_results.py
+deleted file mode 100644
+index d1f7ffe..0000000
+--- a/ssp_vs_non_results.py
++++ /dev/null
+@@ -1,74 +0,0 @@
+-import os
+-import utils
+-
+-import matplotlib.pyplot as plt
+-import seaborn as sns
+-import pandas as pd
+-
+-
+-envs = ['MiniWorld-MazeS2-v0', 'MiniWorld-MazeS3-v0']
+-# envs = ['MiniGrid-Empty-8x8-v0', 'MiniGrid-Empty-16x16-v0', 'MiniGrid-FourRooms-v0',
+-#         'MiniWorld-TMazeLeft-v0', 'MiniWorld-YMazeLeft-v0', 
+-#         'MiniWorld-MazeS2-v0', 'MiniWorld-MazeS3-v0', 'MiniWorld-MazeS3Fast-v0']#,
+-      #  'maze-sample-5x5','maze-sample-10x10-v0','maze-sample-100x100-v0']
+-algos = ['ppo','a2c']
+-all_inputs = ['image','flat', 'ssp']
+-maze_inputs = ['flat', 'ssp']
+-
+-all_models = []
+-
+-for env in envs:
+-    models = []
+-    if env[:4] == 'maze':
+-        inputs = maze_inputs
+-    else:
+-        inputs = all_inputs
+-    for algo in algos:
+-
+-        for input_type in inputs:
+-            if algo=='sr':
+-                other_args = '--entropy-coef 0.01 --entropy-decay 0.9 ' 
+-            else:
+-                other_args = ' --entropy-coef 0.0005 '
+-                
+-            if input_type=='ssp':
+-                input_type = 'ssp-xy'
+-                feature_learn = 'none'
+-                other_args = other_args + ' --ssp-h 1 '
+-            else:
+-                feature_learn = 'curiosity'
+-            
+-            if env[:9] == 'MiniWorld':
+-                other_args = other_args + ' --procs 1 '
+-                
+-            model_name = env + '_' + algo + '_' + input_type
+-            models.append(model_name)
+-            model_dir = utils.get_model_dir(model_name)
+-            if os.path.exists(model_dir):
+-                for f in os.listdir(model_dir):
+-                    os.remove(os.path.join(model_dir, f))
+-                os.rmdir(model_dir)
+-
+-            os.system("python train.py --algo " + algo + " --input " + input_type +
+-                      " --feature-learn " + feature_learn + " --model " + model_name
+-                  + " --env  " + env + " --frames 50000 " + other_args)
+-    all_models.append(models)
+-
+-
+-
+-linestys = {'ssp-xy': '-', 'image':'--', 'flat': '-.'}
+-cols= {'ppo': utils.reds[0], 'a2c': utils.oranges[0],'sr': utils.blues[0],'sr-ppo': utils.purples[0],}
+-for j,env in enumerate(envs):
+-    plt.figure(figsize=(7,3))
+-    plt.xlabel("Frames observed")
+-    plt.ylabel("Average Return")
+-    plt.title(env)
+-    for i,model_name in enumerate(all_models[j]):
+-        model_dir = utils.get_model_dir(model_name)
+-        data = pd.read_csv(model_dir + "/log.csv")
+-        data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-        input_type = model_name.split("_")[2]
+-        algo = model_name.split("_")[1]
+-        sns.lineplot(x="frames", y='avg_return', label=model_name[9:],
+-                     data=data, alpha=0.8, linestyle=linestys[input_type], color=cols[algo])
+-
+diff --git a/train.py b/train.py
+index f0a94df..92664d8 100755
+--- a/train.py
++++ b/train.py
+@@ -1,4 +1,3 @@
+-import importlib
+ import argparse
+ import time
+ import datetime
+@@ -7,13 +6,15 @@ import utils
+ import copy
+ import numpy as np
+ import yaml
++#import signal # for keyboardintrupt
+ 
+ # Possible envs
+ import minigrid
+ import miniworld
+ import gym_maze
+ 
+-import tensorboardX
++
++from torch.utils.tensorboard import SummaryWriter
+ import sys
+ 
+ from models.model import ACModel
+@@ -21,11 +22,10 @@ from models.model import ACModel
+ #from algos.sr_a2c import SRAlgo
+ from algos.a2c import A2CAlgo
+ from algos.ppo import PPOAlgo
+-from models.model_SR import SRModel
++from models.sr_model import SRModel
+ 
+ #python train.py --algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 -a2c --lr_sr 0.01
+-
+-
++#maze-sample-5x5-v0
+ #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+ #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper ssp-xy --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+ #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+@@ -39,382 +39,518 @@ from models.model_SR import SRModel
+ #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 --input ssp-xy --feature-learn none --lr_sr 0.01 --ssp-h 1', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+ #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniWorld-TMazeLeft-v0 --frames 50000 --input ssp-xy --feature-learn none --lr_sr 0.01 --ssp-h 1 --procs 1', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+ #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env maze-sample-5x5 --frames 30000 --input flat --procs 5 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+-# Parse arguments
+-parser = argparse.ArgumentParser()
+-
+-# General parameters
+-parser.add_argument("--algo", required=True,
+-                    help="algorithm to use: a2c | ppo | sr | sr-ppo (REQUIRED)")
+-parser.add_argument("--env", required=True,
+-                    help="name of the environment to train on (REQUIRED)")
+-parser.add_argument("--model", default=None,
+-                    help="name of the model (default: {ENV}_{ALGO}_{TIME})")
+-parser.add_argument("--input", type=str, default="auto",
+-                    help="format of input:  auto | image | flat | ssp | none (default: auto)")
+-parser.add_argument("--wrapper", type=str, default="none",
+-                    help="format of input:  none | ssp-xy | ssp-auto | one-hot | FullyObsWrapper | RGBImgObsWrapper | OneHotPartialObsWrapper | DirectionObsWrapper (default: non)")
+-parser.add_argument("--feature-learn", type=str, default="curiosity",
+-                    help="method for feature learning:  curiosity | reconstruction | combined | none (default: curiosity)")
+-
+-
+-
+-parser.add_argument("--seed", type=int, default=1,
+-                    help="random seed (default: 1)")
+-parser.add_argument("--log-interval", type=int, default=1,
+-                    help="number of updates between two logs (default: 1)")
+-parser.add_argument("--save-interval", type=int, default=10,
+-                    help="number of updates between two saves (default: 10, 0 means no saving)")
+-parser.add_argument("--procs", type=int, default=5,
+-                    help="number of processes (default: 5)")
+-parser.add_argument("--frames", type=int, default=10**7,
+-                    help="number of frames of training (default: 1e7)")
+-parser.add_argument("--load-optimizer-state", type=bool, default=True,
+-                    help="If True and a logs for this model (defined by model arg) exist then load the optimizer info from last run. Otherwise do not.")
+-parser.add_argument("--plot", type=bool, default=False,
+-                    help="If True, plot mean return after training")
+-
+-parser.add_argument("--target-update", type=int, default=10,
+-                    help="how often to update the target network") # right now only set up for sr algo
+-
+-
+-## Parameters for main algorithm
+-parser.add_argument("--epochs", type=int, default=4,
+-                    help="number of epochs for PPO (default: 4)")
+-parser.add_argument("--batch-size", type=int, default=256,
+-                    help="batch size for PPO & reward function learning in SR (default: 256)")
+-parser.add_argument("--frames-per-proc", type=int, default=None,
+-                    help="number of frames per process before update (default: 5 for A2C and 128 for PPO)")
+-parser.add_argument("--discount", type=float, default=0.99,
+-                    help="discount factor (default: 0.99)")
+-
+-# Can either give lr to set leanring rates for all optimzers (default), or can set them individually
+-parser.add_argument("--lr", type=float, default=0.001,
+-                    help="learning rate for all (default: 0.001)")
+-parser.add_argument("--lr_f", type=float, default=None,
+-                    help="learning rate for feature (default: 0.001)")
+-parser.add_argument("--lr_a", type=float, default=None,
+-                    help="learning rate for actor (default: 0.001)")
+-parser.add_argument("--lr_sr", type=float, default=None,
+-                    help="learning rate for SR (default: 0.001)")
+-parser.add_argument("--lr_r", type=float, default=None,
+-                    help="learning rate for reward (default: 0.00001)")
+-
+-parser.add_argument("--gae-lambda", type=float, default=0.95,
+-                    help="lambda coefficient in GAE formula (default: 0.95, 1 means no gae)")
+-parser.add_argument("--entropy-coef", type=float, default=0.0005,
+-                    help="entropy term coefficient (default: 0.0005)")
+-parser.add_argument("--dissim-coef", type=float, default=0.,
+-                    help="state dis-similarity coefficient, only use with ssp obs or env wrappers (default: 0)")
+-parser.add_argument("--entropy-decay", type=float, default=1,
+-                    help="entropy decay coefficient (default: 0.99)")
+-parser.add_argument("--memory-cap", type=int, default=100000,
+-                    help=" (default: 100000)")
+-
+-
+-parser.add_argument("--recon-loss-coef", type=float, default=0.1,
+-                    help="recontruction term coefficient (default: 0.1)")
+-parser.add_argument("--norm-loss-coef", type=float, default=1,
+-                    help="norm loss term coefficient (default: 1)")
+-
+-
+-parser.add_argument("--ssp-dim", type=int, default=151,
+-                    help="Dim of spp (default: 151)")
+-parser.add_argument("--ssp-h", type=float, default=1.,
+-                    help="Length scale of spp representation (default: 1)")
+-
+-parser.add_argument("--value-loss-coef", type=float, default=0.5,
+-                    help="value loss term coefficient (default: 0.5)")
+-parser.add_argument("--max-grad-norm", type=float, default=10,
+-                    help="maximum norm of gradient (default: 10)")
+-parser.add_argument("--optim-eps", type=float, default=1e-8,
+-                    help="Adam and RMSprop optimizer epsilon (default: 1e-8)")
+-parser.add_argument("--optim-alpha", type=float, default=0.99,
+-                    help="RMSprop optimizer alpha (default: 0.99)")
+-parser.add_argument("--clip-eps", type=float, default=0.2,
+-                    help="clipping epsilon for PPO (default: 0.2)")
+-parser.add_argument("--recurrence", type=int, default=1,
+-                    help="number of time-steps gradient is backpropagated (default: 1). If > 1, a LSTM is added to the model to have memory.")
+-parser.add_argument("--text", action="store_true", default=False,
+-                    help="add a GRU to the model to handle text input")
+-
+-parser.add_argument("--env-args", type=yaml.load, default={'render_mode': 'rgb_array'},
+-                    help="")
+-
+-args = parser.parse_args()
+-
+-
+-args.mem = args.recurrence > 1
+-
+-
+-args.lr_a = args.lr_a or args.lr
+-args.lr_sr = args.lr_sr or args.lr
+-args.lr_f = args.lr_f or args.lr
+-args.lr_r = args.lr_r or args.lr
+-
+-if args.input[:3]=='ssp':
+-    args.feature_learn = 'none'
+-
+-# Set run dir
+-
+-date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+-default_model_name = f"{args.env}_{args.algo}_seed{args.seed}_{date}"
+-
+-model_name = args.model or default_model_name
+-model_dir = utils.get_model_dir(model_name)
+-
+-# Load loggers and Tensorboard writer
+-
+-txt_logger = utils.get_txt_logger(model_dir)
+-csv_file, csv_logger = utils.get_csv_logger(model_dir)
+-tb_writer = tensorboardX.SummaryWriter(model_dir)
+-
+-# Log command and all script arguments
+-
+-txt_logger.info("{}\n".format(" ".join(sys.argv)))
+-txt_logger.info("{}\n".format(args))
+-
+-# Set seed for all randomness sources
+-
+-utils.seed(args.seed)
+-
+-# Set device
+-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+-txt_logger.info(f"Device: {device}\n")
+-
+-# Load environments
+-envs = []
+-if args.wrapper=='none':
+-    for i in range(args.procs):
+-        envs.append(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args))
+-elif args.wrapper =='ssp-auto':
+-    from wrappers import SSPEnvWrapper
+-    for i in range(args.procs):
+-        envs.append( SSPEnvWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+-                            auto_convert_obs_space = True,auto_convert_action_space=False, shape_out = args.ssp_dim, length_scale=args.ssp_h,
+-                            decoder_method = 'from-set'))
+-elif (args.env[:8]=='MiniGrid') or (args.env[:6]=='BabyAI'):
+-    if (args.wrapper =='xy'):
+-        from wrappers import MiniGridXYWrapper
+-        for i in range(args.procs):
+-            envs.append( MiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
+-    elif (args.wrapper =='one-hot'):
+-        from wrappers import MiniGridOneHotWrapper
++
++
++#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env maze-random-7x7 --frames 30000 --wrapper ssp-auto --plot True --n_test_episodes 0 --ssp-h 1 --lr 0.001 --entropy-decay 1e-5 --gae-lambda 1 --optim-eps 1e-9 --entropy-coef 0.0002 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
++
++
++def run(args=None,**kwargs): 
++    if args is None:
++        if "config" in kwargs:
++            configfilename = kwargs['config']
++        else:
++            configfilename = 'default_config.yml'
++        with open(configfilename, 'r') as f: # load the defaults
++            config = yaml.load(f, Loader=yaml.FullLoader)
++        config.update(kwargs) # 
++        args = argparse.Namespace(**config)
++    
++    args.mem = args.recurrence > 1
++    args.lr_a = args.lr_a or args.lr
++    args.lr_sr = args.lr_sr or args.lr
++    args.lr_f = args.lr_f or args.lr
++    args.lr_r = args.lr_r or args.lr
++    
++    # if args.input[:3]=='ssp':
++    #     args.feature_learn = 'none'
++    
++    # Set run dir
++    
++    date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
++    default_model_name = f"{args.env}_{args.algo}_seed{args.seed}_{date}"
++    
++    model_name = args.model or default_model_name
++    model_dir = utils.get_model_dir(model_name)
++    
++    # Load loggers and Tensorboard writer
++    txt_logger = utils.get_txt_logger(model_dir, args.verbose)
++    csv_file, csv_logger = utils.get_csv_logger(model_dir)
++    tb_writer = SummaryWriter(model_dir)
++    
++    # Log command and all script arguments
++    
++    txt_logger.info("{}\n".format(" ".join(sys.argv)))
++    txt_logger.info("{}\n".format(args))
++    
++    # Set seed for all randomness sources
++    
++    utils.seed(args.seed)
++    
++    # Set device
++    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
++    txt_logger.info(f"Device: {device}\n")
++    
++    # Load environments
++    envs = []
++    if args.wrapper=='none':
+         for i in range(args.procs):
+-            envs.append( MiniGridOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
+-    elif (args.wrapper =='ssp-xy'):
+-        from wrappers import SSPMiniGridXYWrapper
+-        for i in range(args.procs): #***
+-            # envs.append( SSPMiniActionWrapper(SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+-            #                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'), 
+-            #                                   seed=args.seed, shape_out=args.ssp_dim) )
+-            envs.append( SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+-                                 shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set') )
+-    elif(args.wrapper =='ssp-view'):
+-        from wrappers import SSPMiniGridViewWrapper
++            envs.append(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args))
++    elif args.wrapper =='ssp-auto':
++        from wrappers import SSPEnvWrapper
+         for i in range(args.procs):
+-            envs.append( SSPMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+-                                 shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )    
+-    elif(args.wrapper =='ssp-lang'):
+-         from wrappers import SSPBabyAIViewWrapper
+-         for i in range(args.procs):
+-             envs.append( SSPBabyAIViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+-                                  shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )  
++            envs.append( SSPEnvWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
++                                auto_convert_obs_space = True,auto_convert_action_space=False, shape_out = args.ssp_dim, length_scale=args.ssp_h,
++                                decoder_method = 'from-set'))
++    elif (args.env[:8]=='MiniGrid') or (args.env[:6]=='BabyAI'):
++        if (args.wrapper =='xy'):
++            from wrappers import MiniGridXYWrapper
++            for i in range(args.procs):
++                envs.append( MiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
++        elif (args.wrapper =='one-hot'):
++            from wrappers import MiniGridOneHotWrapper
++            for i in range(args.procs):
++                envs.append( MiniGridOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
++        elif (args.wrapper =='ssp-xy'):
++            from wrappers import SSPMiniGridXYWrapper
++            for i in range(args.procs): #***
++                # envs.append( SSPMiniActionWrapper(SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
++                #                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'), 
++                #                                   seed=args.seed, shape_out=args.ssp_dim) )
++                envs.append( SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
++                                     shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set') )
++        elif(args.wrapper =='ssp-view'):
++            from wrappers import SSPMiniGridViewWrapper
++            for i in range(args.procs):
++                envs.append( SSPMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
++                                     shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )    
++        elif(args.wrapper =='ssp-lang'):
++             from wrappers import SSPBabyAIViewWrapper
++             for i in range(args.procs):
++                 envs.append( SSPBabyAIViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
++                                      shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )  
++        else:
++            exec(f"from minigrid.wrappers import {args.wrapper} as wrapper")
++            for i in range(args.procs):
++                envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
++    elif (args.env[:9]=='MiniWorld'): 
++        if (args.wrapper =='ssp-xy'):
++            from wrappers import SSPMiniWorldXYWrapper
++            for i in range(args.procs):
++                envs.append( SSPMiniWorldXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
++                                     shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'))
++        elif (args.wrapper =='xy'):
++            from wrappers import MiniWorldXYWrapper
++            for i in range(args.procs):
++                envs.append( MiniWorldXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))  
++        elif (args.wrapper =='one-hot'):
++            from wrappers import MiniWorldOneHotWrapper
++            for i in range(args.procs):
++                envs.append( MiniWorldOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))  
++        else:
++            exec(f"from miniworld.wrappers import {args.wrapper} as wrapper")
++            for i in range(args.procs):
++                envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
++    
++    
++    txt_logger.info("Environments loaded\n")
++    
++    # Load training status
++    try:
++        status = utils.get_status(model_dir)
++    except OSError:
++        status = {"num_frames": 0, "update": 0}
++    txt_logger.info("Training status loaded\n")
++    
++    # Load observations preprocessor
++    obs_space, preprocess_obss = utils.get_obss_preprocessor(envs[0].observation_space)
++    
++    if args.input =='auto':
++        if len(obs_space['image']) ==1: ##check
++            args.input = 'flat'
++        else:
++            args.input = 'image'
++    
++    if "vocab" in status:
++        preprocess_obss.vocab.load_vocab(status["vocab"])
++    txt_logger.info("Observations preprocessor loaded")
++    
++    # Load model
++    is_sr = (args.algo == "sr") or (args.algo == "sr-ppo")
++    if is_sr:
++        model = SRModel(obs_space, envs[0].action_space, args.mem, args.text, args.normalize_embeddings,
++                        args.input, args.feature_learn, 
++                        obs_space_sampler=envs[0].observation_space,
++                        critic_hidden_size=args.critic_hidden_size,
++                        actor_hidden_size=args.actor_hidden_size, 
++                        feature_hidden_size=args.feature_hidden_size,
++                        feature_size=args.feature_size, feature_learn_hidden_size=args.feature_learn_hidden_size)
+     else:
+-        exec(f"from minigrid.wrappers import {args.wrapper} as wrapper")
+-        for i in range(args.procs):
+-            envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
+-elif (args.env[:9]=='MiniWorld'): 
+-    if (args.wrapper =='ssp-xy'):
+-        from wrappers import SSPMiniWorldXYWrapper
+-        for i in range(args.procs):
+-            envs.append( SSPMiniWorldXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+-                                 shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'))
+-    elif (args.wrapper =='xy'):
+-        from wrappers import MiniWorldXYWrapper
+-        for i in range(args.procs):
+-            envs.append( MiniWorldXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))  
+-    elif (args.wrapper =='one-hot'):
+-        from wrappers import MiniWorldOneHotWrapper
+-        for i in range(args.procs):
+-            envs.append( MiniWorldOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))  
++        model = ACModel(obs_space, envs[0].action_space, args.mem, args.text,args.normalize_embeddings,
++                        args.input, obs_space_sampler=envs[0].observation_space,
++                        critic_hidden_size=args.critic_hidden_size,
++                        actor_hidden_size=args.actor_hidden_size, 
++                        feature_hidden_size=args.feature_hidden_size,
++                        feature_size=args.feature_size)
++    if "model_state" in status:
++        model.load_state_dict(status["model_state"])
++
++    model.to(device)
++    txt_logger.info("Model loaded\n")
++    txt_logger.info("{}\n".format(model))
++    
++    # Load algo
++    #reshape_reward = lambda o,a,r,d: -0.1 if r==0 else 10
++    if args.algo == "a2c":
++        algo = A2CAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
++                                args.entropy_coef,args.entropy_decay, args.value_loss_coef, args.dissim_coef, args.max_grad_norm, args.recurrence,
++                                args.optim_alpha, args.optim_eps, preprocess_obss)
++    elif args.algo == "ppo":
++        algo = PPOAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
++                                args.entropy_coef,args.entropy_decay, args.value_loss_coef,args.dissim_coef, args.max_grad_norm, args.recurrence,
++                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
++    elif args.algo == "sr":
++        from algos.sr_a2c import SRAlgo
++        algo = SRAlgo(envs, model, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
++                                args.dissim_coef, args.entropy_coef,args.entropy_decay, 
++                                args.max_grad_norm, args.recurrence,
++                                args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss)
++    
++    elif args.algo == "sr-ppo":
++        from algos.sr_ppo import SRPPOAlgo
++        algo = SRPPOAlgo(envs, model, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
++                                args.dissim_coef, args.entropy_coef,args.entropy_decay, 
++                                args.max_grad_norm, args.recurrence,
++                                args.optim_alpha, args.optim_eps, args.memory_cap, args.epochs, args.batch_size, args.clip_eps , preprocess_obss,None)
+     else:
+-        exec(f"from miniworld.wrappers import {args.wrapper} as wrapper")
+-        for i in range(args.procs):
+-            envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
+-
+-if args.input =='auto':
+-    if (type(envs[0].observation_space['image'].shape) is tuple) and len(envs[0].observation_space['image'].shape)==3:
+-        args.input = 'image'
++        raise ValueError("Incorrect algorithm name: {}".format(args.algo))
++    
++    if is_sr:
++        if ("sr_optimizer_state" in status) and args.load_optimizer_state:
++            algo.sr_optimizer.load_state_dict(status["sr_optimizer_state"])
++        if ("reward_optimizer_state" in status) and args.load_optimizer_state:
++            algo.reward_optimizer.load_state_dict(status["reward_optimizer_state"])
++        if ("actor_optimizer_state" in status) and args.load_optimizer_state:
++            algo.actor_optimizer.load_state_dict(status["actor_optimizer_state"])
++        if ("feature_optimizer_state" in status) and args.load_optimizer_state:
++            algo.feature_optimizer.load_state_dict(status["feature_optimizer_state"])
+     else:
+-        args.input = 'flat'
+-txt_logger.info("Environments loaded\n")
+-
+-# Load training status
+-try:
+-    status = utils.get_status(model_dir)
+-except OSError:
+-    status = {"num_frames": 0, "update": 0}
+-txt_logger.info("Training status loaded\n")
+-
+-# Load observations preprocessor
+-
+-obs_space, preprocess_obss = utils.get_obss_preprocessor(envs[0].observation_space)
+-if "vocab" in status:
+-    preprocess_obss.vocab.load_vocab(status["vocab"])
+-txt_logger.info("Observations preprocessor loaded")
+-
+-# Load model
+-is_sr = (args.algo == "sr") or (args.algo == "sr-ppo")
+-if is_sr:
+-    model = SRModel(obs_space, envs[0].action_space, args.mem, args.text, args.input, args.feature_learn, obs_space_sampler=envs[0].observation_space)
+-else:
+-    model = ACModel(obs_space, envs[0].action_space, args.mem, args.text, args.input, obs_space_sampler=envs[0].observation_space)
+-target = copy.deepcopy(model)
+-if "model_state" in status:
+-    model.load_state_dict(status["model_state"])
+-if "target_state" in status:
+-    target.load_state_dict(status["target_state"])
+-model.to(device)
+-target.to(device)
+-txt_logger.info("Model loaded\n")
+-txt_logger.info("{}\n".format(model))
+-
+-# Load algo
+-#reshape_reward = lambda o,a,r,d: -0.1 if r==0 else 10
+-if args.algo == "a2c":
+-    algo = A2CAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+-                            args.entropy_coef,args.entropy_decay, args.value_loss_coef, args.dissim_coef, args.max_grad_norm, args.recurrence,
+-                            args.optim_alpha, args.optim_eps, preprocess_obss)
+-elif args.algo == "ppo":
+-    algo = PPOAlgo(envs, model, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
+-                            args.entropy_coef,args.entropy_decay, args.value_loss_coef, args.max_grad_norm, args.recurrence,
+-                            args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
+-elif args.algo == "sr":
+-    from algos.sr_a2c import SRAlgo
+-    algo = SRAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
+-                            args.entropy_coef,args.entropy_decay, args.norm_loss_coef,
+-                            args.max_grad_norm, args.recurrence,
+-                            args.optim_alpha, args.optim_eps, args.memory_cap, args.batch_size, preprocess_obss)
+-
+-elif args.algo == "sr-ppo":
+-    from algos.sr_ppo import SRPPOAlgo
+-    algo = SRPPOAlgo(envs, model, target, args.feature_learn, device, args.frames_per_proc, args.discount, args.lr_a,args.lr_f,args.lr_sr,args.lr_r, args.gae_lambda,
+-                            args.entropy_coef,args.entropy_decay, args.norm_loss_coef,
+-                            args.max_grad_norm, args.recurrence,
+-                            args.optim_alpha, args.optim_eps, args.memory_cap, args.epochs, args.batch_size, args.clip_eps , preprocess_obss,None)
+-else:
+-    raise ValueError("Incorrect algorithm name: {}".format(args.algo))
+-
+-if is_sr:
+-    if ("sr_optimizer_state" in status) and args.load_optimizer_state:
+-        algo.sr_optimizer.load_state_dict(status["sr_optimizer_state"])
+-    if ("reward_optimizer_state" in status) and args.load_optimizer_state:
+-        algo.reward_optimizer.load_state_dict(status["reward_optimizer_state"])
+-    if ("actor_optimizer_state" in status) and args.load_optimizer_state:
+-        algo.actor_optimizer.load_state_dict(status["actor_optimizer_state"])
+-    if ("feature_optimizer_state" in status) and args.load_optimizer_state:
+-        algo.feature_optimizer.load_state_dict(status["feature_optimizer_state"])
+-else:
+-    if ("optimizer_state" in status) and args.load_optimizer_state:
+-        algo.optimizer.load_state_dict(status["optimizer_state"])
+-txt_logger.info("Optimizer loaded\n")
+-
+-# Train model
+-num_frames = status["num_frames"]
+-update = status["update"]
+-start_time = time.time()
+-first_line=num_frames==0
+-
+-
+-while num_frames < args.frames:
+-    # Update model parameters
+-    update_start_time = time.time()
+-    exps, logs1 = algo.collect_experiences()
+-    logs2 = algo.update_parameters(exps)
+-    logs = {**logs1, **logs2}
+-    update_end_time = time.time()
+-
+-    num_frames += logs["num_frames"]
+-    update += 1
+-    
+-    # Update target
+-    if update % args.target_update == 0:
+-        target.load_state_dict(model.state_dict())
+-
+-    # Print logs
+-    if update % args.log_interval == 0:
+-        fps = logs["num_frames"]/(update_end_time - update_start_time)
+-        duration = int(time.time() - start_time)
+-        return_per_episode = utils.synthesize(logs["return_per_episode"])
+-        rreturn_per_episode = utils.synthesize(logs["reshaped_return_per_episode"])
+-        num_frames_per_episode = utils.synthesize(logs["num_frames_per_episode"])
+-
+-        header = ["update", "frames", "FPS", "duration"]
+-        data = [update, num_frames, fps, duration]
+-        header += ["rreturn_" + key for key in rreturn_per_episode.keys()]
+-        data += rreturn_per_episode.values()
+-        header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
+-        data += num_frames_per_episode.values()
+-        if is_sr:
+-            header += ["entropy", "policy_loss", "sr_loss",
+-                       "feature_loss","reward_loss","grad_norm", ]
+-            data += [logs["entropy"],  logs["policy_loss"], logs["sr_loss"],
+-                     logs["feature_loss"], logs["reward_loss"], logs["grad_norm"]]
+-    
+-            txt_logger.info("Frames {}, Mean reward {:.3f}, Policy loss {:.3f}, SR loss {:.3f}, Reward loss {:.3f}, Feature loss {:.3f}".format(num_frames, rreturn_per_episode['mean'], logs["policy_loss"], logs["sr_loss"],logs["reward_loss"],logs["feature_loss"]))
+-        else:
+-            header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
+-            data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
++        if ("optimizer_state" in status) and args.load_optimizer_state:
++            algo.optimizer.load_state_dict(status["optimizer_state"])
++    txt_logger.info("Optimizer loaded\n")
+     
+-            txt_logger.info(
+-                "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f}"
+-                .format(*data))
+-
+-        header += ["return_" + key for key in return_per_episode.keys()]
+-        data += return_per_episode.values()
+-
+-        if first_line:
+-            csv_logger.writerow(header)
+-            first_line = False
+-        csv_logger.writerow(data)
+-        csv_file.flush()
++    
++    if args.wandb:
++        from collections import deque
++        try:
++            import wandb
++        except ImportError as e:
++            raise ImportError(
++                "if you want to use Weights & Biases to track experiment, please install W&B via `pip install wandb`"
++            ) from e
++
++        run_name = f"{args.env}__{args.algo}__{args.seed}__{int(time.time())}"
++        tags = [*args.wandb_tags, "successor-features-A2C"]
++        wandbrun = wandb.init(
++            name=run_name,
++            project=args.wandb_project_name,
++            entity=args.wandb_entity,
++            tags=tags,
++            config=vars(args),
++            sync_tensorboard=True,  # auto-upload tensorboard metrics
++            monitor_gym=False,  # do not auto-upload the videos of agents playing the game
++            save_code=True,  # optional
++        )
++        ep_info_buffer = deque(maxlen=100)
+ 
+-        for field, value in zip(header, data):
+-            tb_writer.add_scalar(field, value, num_frames)
++    
++    
++    # Train model
++    num_frames = status["num_frames"]
++    update = status["update"]
++    start_time = time.time()
++    first_line=num_frames==0
++    
++    
++    # keybaordstop = False
+ 
++    # def handler(sig, frame):
++    #     global keybaordstop
++    #     keybaordstop = True
++    
++    # signal.signal(signal.SIGINT, handler)
++    
++    while (num_frames < args.frames):# and not keybaordstop:
++        
++
++        # Update model parameters
++        update_start_time = time.time()
++        exps, logs1 = algo.collect_experiences()
++        logs2 = algo.update_parameters(exps)
++        logs = {**logs1, **logs2}
++        update_end_time = time.time()
++    
++        num_frames += logs["num_frames"]
++        update += 1
++        
++        if args.wandb:
++            [ep_info_buffer.append(l) for l in logs["return_per_episode"]];
++            wandb.log({"global_step": num_frames, "rollout/ep_rew_mean": utils.safe_mean(ep_info_buffer)})
++    
++        # Print logs
++        if update % args.log_interval == 0:
++            fps = logs["num_frames"]/(update_end_time - update_start_time)
++            duration = int(time.time() - start_time)
++            return_per_episode = utils.synthesize(logs["return_per_episode"])
++            rreturn_per_episode = utils.synthesize(logs["reshaped_return_per_episode"])
++            num_frames_per_episode = utils.synthesize(logs["num_frames_per_episode"])
++    
++            header = ["update", "frames", "FPS", "duration"]
++            data = [update, num_frames, fps, duration]
++            header += ["rreturn_" + key for key in rreturn_per_episode.keys()]
++            data += rreturn_per_episode.values()
++            header += ["num_frames_" + key for key in num_frames_per_episode.keys()]
++            data += num_frames_per_episode.values()
++            if is_sr:
++                header += ["entropy", "policy_loss", "sr_loss",
++                           "feature_loss","reward_loss","grad_norm", ]
++                data += [logs["entropy"],  logs["policy_loss"], logs["sr_loss"],
++                         logs["feature_loss"], logs["reward_loss"], logs["grad_norm"]]
++        
++                txt_logger.info(
++                    "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | pL {:.3f} | srL {:.3f} | fL {:.3f} |  rL {:.3f} | ∇ {:.3f}"
++                    .format(*data))
++            else:
++                header += ["entropy", "value", "policy_loss", "value_loss", "grad_norm"]
++                data += [logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"], logs["grad_norm"]]
++        
++                txt_logger.info(
++                    "U {} | F {:06} | FPS {:04.0f} | D {} | rR:μσmM {:.2f} {:.2f} {:.2f} {:.2f} | F:μσmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | pL {:.3f} | vL {:.3f} | ∇ {:.3f}"
++                    .format(*data))
++    
++            header += ["return_" + key for key in return_per_episode.keys()]
++            data += return_per_episode.values()
++    
++            if first_line:
++                csv_logger.writerow(header)
++                first_line = False
++            csv_logger.writerow(data)
++            csv_file.flush()
++    
++            for field, value in zip(header, data):
++                tb_writer.add_scalar(field, value, num_frames)
++        
+ 
+-    # Save status
++    
++        # Save status
++    
++        if args.save_interval > 0 and update % args.save_interval == 0:
++            if is_sr and args.feature_learn!='combined':
++                status = {"num_frames": num_frames, "update": update,
++                      "model_state": model.state_dict(),
++                      "reward_optimizer_state": algo.reward_optimizer.state_dict(),
++                      "sr_optimizer_state": algo.sr_optimizer.state_dict(), "actor_optimizer_state": algo.actor_optimizer.state_dict()}
++                if (args.feature_learn!="none"):
++                      status["feature_optimizer_state"] = algo.feature_optimizer.state_dict()
++            else:
++                status = {"num_frames": num_frames, "update": update,
++                      "model_state": model.state_dict(), 
++                      "optimizer_state": algo.optimizer.state_dict()}
++                
++            if hasattr(preprocess_obss, "vocab"):
++                status["vocab"] = preprocess_obss.vocab.vocab
++            utils.save_status(status, model_dir)
++            txt_logger.info("Status saved")
++       
+ 
+-    if args.save_interval > 0 and update % args.save_interval == 0:
+-        if is_sr and args.feature_learn!='combined':
+-            status = {"num_frames": num_frames, "update": update,
+-                  "model_state": model.state_dict(),"target_state": target.state_dict(),
+-                  "reward_optimizer_state": algo.reward_optimizer.state_dict(),
+-                  "sr_optimizer_state": algo.sr_optimizer.state_dict(), "actor_optimizer_state": algo.actor_optimizer.state_dict()}
+-            if (args.feature_learn!="none"):
+-                  status["feature_optimizer_state"] = algo.feature_optimizer.state_dict()
+-        else:
+-            status = {"num_frames": num_frames, "update": update,
+-                  "model_state": model.state_dict(), 
+-                  "optimizer_state": algo.optimizer.state_dict()}
+             
+-        if hasattr(preprocess_obss, "vocab"):
+-            status["vocab"] = preprocess_obss.vocab.vocab
+-        utils.save_status(status, model_dir)
+-        txt_logger.info("Status saved")
+-
+-if args.plot:
+-    import matplotlib.pyplot as plt
+-    import seaborn as sns
+-    import pandas as pd
+-    data = pd.read_csv(model_dir + "/log.csv")
+-    data['avg_return'] = data.return_mean.copy().rolling(100).mean()
+-    sns.lineplot(x="frames", y='return_mean', label="Return", data=data)
+-    sns.lineplot(x="frames",y="avg_return",
+-                  label="Moving Avg",data=data)
+-    plt.xlabel("Frames observed", size=14)
+-    plt.ylabel("Return", size=14)
+-    plt.title('Return')
++    if args.plot:
++        import matplotlib.pyplot as plt
++        import seaborn as sns
++        import pandas as pd
++        data = pd.read_csv(model_dir + "/log.csv")
++        data['avg_return'] = data.return_mean.copy().rolling(100).mean()
++        sns.lineplot(x="frames", y='return_mean', label="Return", data=data)
++        sns.lineplot(x="frames",y="avg_return",
++                      label="Moving Avg",data=data)
++        plt.xlabel("Frames observed", size=14)
++        plt.ylabel("Average Return", size=14)
++        plt.title( f"{args.env}, {args.algo}")
++    
++    if False: #args.n_test_episodes >0: # need to fix agent to use all new model init inputs
++        env=envs[0]
++        agent = utils.Agent(obs_space, env.action_space, model_dir, model_name =args.algo,
++                        device=device, argmax=True, num_envs=1, use_memory=args.mem, use_text=args.text,
++                        input_type = args.input, feature_learn = args.feature_learn, preprocess_obss=preprocess_obss)
++        test_episode_returns = np.zeros(args.n_test_episodes)
++        for episode in range(args.n_test_episodes):
++            obs,_ = env.reset()
++            n_steps = 0
++            while n_steps<500:
++                n_steps += 1
++                action = agent.get_action(obs)
++                obs, reward, t1,t2, _ = env.step(action)
++                test_episode_returns[episode] += reward
++                done = t1 or t2
++                agent.analyze_feedback(reward, done)
++        
++                if done:   
++                    break
++        txt_logger.info("Average test return: " + str(np.mean(test_episode_returns)) 
++                        + " (" + str(np.min(test_episode_returns)) + ", " + str(np.max(test_episode_returns)) + ")")
++    else:
++        test_episode_returns = None
++    
++    if args.wandb:
++        wandbrun.finish()
++    csv_file.close()
++    tb_writer.close()
++        
++    return model_name, test_episode_returns
++
++
++if __name__ == "__main__":
++    # Parse arguments
++    parser = argparse.ArgumentParser()
++
++    parser.add_argument(
++        '--conf', type=str, default='default_config.yml',
++        help='Configuration file'
++    )
++    args, remaining = parser.parse_known_args()
++    defaults = {}
++    with open(args.conf, 'r') as f: # load the defaults
++        defaults = yaml.load(f, Loader=yaml.FullLoader)
++        
++    # Parameters to set-up env, algo type
++    parser.add_argument("--algo", required=True,
++                        help="algorithm to use: a2c | ppo | sr | sr-ppo (REQUIRED)")
++    parser.add_argument("--env", required=True,
++                        help="name of the environment to train on (REQUIRED)")
++    parser.add_argument("--model", default=None,
++                        help="name of the model (default: {ENV}_{ALGO}_{TIME})")
++    parser.add_argument("--input", type=str, default="auto",
++                        help="format of input:  auto | image | flat | ssp | none (default: auto)")
++    parser.add_argument("--wrapper", type=str, default="none",
++                        help="format of input:  none | ssp-xy | ssp-auto | one-hot | FullyObsWrapper | RGBImgObsWrapper | OneHotPartialObsWrapper | DirectionObsWrapper (default: non)")
++    parser.add_argument("--env-args", type=yaml.load, default={'render_mode': 'rgb_array'},
++                        help="")
++
++    # General algo parameters
++    parser.add_argument("--seed", type=int, default=1,
++                        help="random seed (default: 1)")
++    parser.add_argument("--frames", type=int, default=10**7,
++                        help="number of frames of training (default: 1e7)")
++    parser.add_argument("--discount", type=float, default=0.99,
++                        help="discount factor (default: 0.99)")
++    parser.add_argument("--procs", type=int, default=5,
++                        help="number of processes (default: 5)")
++    parser.add_argument("--frames-per-proc", type=int, default=None,
++                        help="number of frames per process before update (default: 5 for A2C and 128 for PPO)")
++    parser.add_argument("--epochs", type=int, default=4,
++                        help="number of epochs for PPO (default: 4)")
++    parser.add_argument("--batch-size", type=int, default=256,
++                        help="batch size for PPO & reward function learning in SR (default: 256)")
++    parser.add_argument("--lr", type=float, default=0.001,
++                        help="learning rate for all (default: 0.001)")
++    
++    # Logging parameters
++    parser.add_argument("--log-interval", type=int, default=1,
++                        help="number of updates between two logs (default: 1)")
++    parser.add_argument("--save-interval", type=int, default=10,
++                        help="number of updates between two saves (default: 10, 0 means no saving)")
++    parser.add_argument("--n_test_episodes", type=int, default=10,
++                        help="number eps during test phase (default: 10)")
++    parser.add_argument("--load-optimizer-state", type=bool, default=False,
++                        help="If True and a logs for this model (defined by model arg) exist then load the optimizer info from last run. Otherwise do not.")
++    parser.add_argument("--plot", type=bool, default=False,
++                        help="If True, plot mean return after training")
++    parser.add_argument("--verbose", type=bool, default=True,
++                        help="")
++    
++    # For SR: can just give lr (above) or set different learning rates for the different parts
++    parser.add_argument("--lr_f", type=float, default=None,
++                        help="learning rate for feature (default: 0.001)")
++    parser.add_argument("--lr_a", type=float, default=None,
++                        help="learning rate for actor (default: 0.001)")
++    parser.add_argument("--lr_sr", type=float, default=None,
++                        help="learning rate for SR (default: 0.001)")
++    parser.add_argument("--lr_r", type=float, default=None,
++                        help="learning rate for reward (default: 0.00001)")
++    parser.add_argument("--normalize-embeddings", type=bool, default=False,
++                        help="whether or not to normlize embeddings")
++    
++    # Model parameters/options
++    parser.add_argument("--feature-learn", type=str, default="cm",
++                        help="method for feature learning:  cm | icm | latent | lap | aenc | none (default: cm)")
++    parser.add_argument("--recurrence", type=int, default=1,
++                        help="number of time-steps gradient is backpropagated (default: 1). If > 1, a LSTM is added to the model to have memory.")
++    parser.add_argument("--text", action="store_true", default=False,
++                        help="add a GRU to the model to handle text input")
++
++    # Loss computation & optimzer parameters
++    parser.add_argument("--gae-lambda", type=float, default=0.95,
++                        help="lambda coefficient in GAE formula (default: 0.95, 1 means no gae)")
++    parser.add_argument("--entropy-coef", type=float, default=0.0005,
++                        help="entropy term coefficient (default: 0.0005)")
++    parser.add_argument("--entropy-decay", type=float, default=0.,
++                        help="entropy decay coefficient (default: 0, no decay)")
++    parser.add_argument("--memory-cap", type=int, default=100000,
++                        help=" (default: 100000)")
++    parser.add_argument("--dissim-coef", type=float, default=0.,
++                        help="state dis-similarity coefficient, only use with ssp obs or env wrappers (default: 0)")
++    parser.add_argument("--value-loss-coef", type=float, default=0.5,
++                        help="value loss term coefficient (default: 0.5)")
++    parser.add_argument("--max-grad-norm", type=float, default=10,
++                        help="maximum norm of gradient (default: 10)")
++    parser.add_argument("--optim-eps", type=float, default=1e-8,
++                        help="Adam and RMSprop optimizer epsilon (default: 1e-8)")
++    parser.add_argument("--optim-alpha", type=float, default=0.99,
++                        help="RMSprop optimizer alpha (default: 0.99)")
++    parser.add_argument("--clip-eps", type=float, default=0.2,
++                        help="clipping epsilon for PPO (default: 0.2)")
++
++    # SSP parameters: if input=ssp or wrapper is an SSP type
++    parser.add_argument("--ssp-dim", type=int, default=151,
++                        help="Dim of spp (default: 151)")
++    parser.add_argument("--ssp-h", type=float, default=None,
++                        help="Length scale of spp representation (default: None, it auto-selects")
++
++
++    # Arch parameters
++    parser.add_argument("--critic-hidden-size", type=int, default=64,
++                        help="# of neurons in hidden layer of either the critic network or the SR network (default: 64)")
++    parser.add_argument("--actor-hidden-size", type=int, default=64,
++                        help="# of neurons in hidden layer of the actor network (default: 64)")
++    parser.add_argument("--feature-hidden-size", type=int, default=64,
++                        help="# of neurons in hidden layer of the feature network, only applicable with input-type = flat (default: 256)")
++    parser.add_argument("--feature-size", type=int, default=64,
++                        help="size of features, only applicable with input-type = flat (default: 64)")
++    parser.add_argument("--feature-learn-hidden-size", type=int, default=64,
++                        help="# of neurons in hidden layer of the feature learner network, only applicable with sr algo  (default: 64)")
++
++    # wandb 
++    parser.add_argument(
++        "--wandb",
++        action="store_true",
++        default=False,
++        help="if toggled, this experiment will be tracked with Weights and Biases",
++    )
++    parser.add_argument("--wandb-project-name", type=str, default="sfa2c", help="the wandb's project name")
++    parser.add_argument("--wandb-entity", type=str, default=None, help="the entity (team) of wandb's project")
++    parser.add_argument(
++        "-tags", "--wandb-tags", type=str, default=[], nargs="+", help="Tags for wandb run, e.g.: -tags optimized pr-123"
++    )
++    
++    parser.set_defaults(**defaults)
++    args = parser.parse_args()
++    
++    # with open('default_config.json', 'w') as f:
++    #     json.dump(vars(args), fe)
++    # with open('default_config.yml', 'w') as outfile:
++    #     yaml.dump(vars(args), outfile, default_flow_style=False)
++    
++    run(args)
++
+ # plt.figure()
+ # sns.lineplot(x="frames", y='entropy', data=data)
+ # plt.title('Entropy')
+diff --git a/utils/__init__.py b/utils/__init__.py
+index ad4c422..cb9f010 100644
+--- a/utils/__init__.py
++++ b/utils/__init__.py
+@@ -1,8 +1,9 @@
++from .other import *
++
+ from .agent import *
+ from .env import *
+ from .penv import *
+ from .format import *
+-from .other import *
+ from .storage import *
+ from .dictlist import *
+ from .figures import *
+diff --git a/utils/agent.py b/utils/agent.py
+index d5f278f..94f4276 100644
+--- a/utils/agent.py
++++ b/utils/agent.py
+@@ -2,7 +2,7 @@ import torch
+ 
+ import utils
+ from models.model import ACModel
+-from models.model_SR import SRModel
++from models.sr_model import SRModel
+ 
+ 
+ class Agent:
+@@ -12,15 +12,19 @@ class Agent:
+     - to choose an action given an observation,
+     - to analyze the feedback (i.e. reward and done state) of its action."""
+ 
+-    def __init__(self, obs_space, action_space, model_dir, model_name = 'AC',
++    def __init__(self, obs_space, action_space, model_dir, model_name = 'a2c',
+                  device=None, argmax=False, num_envs=1, use_memory=False, 
+-                 use_text=False,input_type="image", feature_learn="curiosity"):
+-        obs_space, self.preprocess_obss = utils.get_obss_preprocessor(obs_space)
+-        if model_name == 'ac':
+-            self.acmodel = ACModel(obs_space, action_space, use_memory=use_memory, use_text=use_text)
+-        elif model_name == 'sr':
++                 use_text=False,input_type="image", feature_learn="curiosity",preprocess_obss=None):
++        if preprocess_obss is None:
++            obs_space, self.preprocess_obss = utils.get_obss_preprocessor(obs_space)
++        else:
++            self.preprocess_obss = preprocess_obss
++        if "sr" in model_name:
+             self.acmodel = SRModel(obs_space, action_space, device, input_type=input_type,
+                                    use_memory=use_memory, use_text=use_text,feature_learn=feature_learn)
++        else:
++            self.acmodel = ACModel(obs_space, action_space, input_type=input_type, use_memory=use_memory, use_text=use_text)
++            
+         self.model_name = model_name
+         self.device = device
+         self.argmax = argmax
+@@ -36,19 +40,23 @@ class Agent:
+             self.preprocess_obss.vocab.load_vocab(utils.get_vocab(model_dir))
+ 
+     def get_actions(self, obss):
++        if self.acmodel.continuous_action:
++            obss = [o for o in self.acmodel.scaler.transform(obss)]
++            
+         preprocessed_obss = self.preprocess_obss(obss, device=self.device)
+ 
+         with torch.no_grad():
+-            if self.model_name == 'ac':
++            if 'sr' in self.model_name:
++                if self.acmodel.use_memory:
++                    dist, _, _, _, _, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
++                else:
++                    dist, _, _, _, _, _ = self.acmodel(preprocessed_obss)
++            else:
+                 if self.acmodel.recurrent:
+                     dist, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
+                 else:
+                     dist, _ = self.acmodel(preprocessed_obss)
+-            elif self.model_name == 'sr':
+-                if self.acmodel.recurrent:
+-                    dist, _, _, _, _, _, _,self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
+-                else:
+-                    dist, _, _, _, _, _,_ = self.acmodel(preprocessed_obss)
++                
+ 
+ 
+         if self.argmax:
+diff --git a/utils/other.py b/utils/other.py
+index 226f83a..36c1b80 100644
+--- a/utils/other.py
++++ b/utils/other.py
+@@ -3,6 +3,11 @@ import numpy
+ import torch
+ import collections
+ import os
++from torch import nn
++import torch.nn.functional as F
++from torch import distributions as pyd
++from torch.distributions.utils import _standard_normal
++import math
+ 
+ def seed(seed):
+     os.environ['PYTHONHASHSEED'] = str(seed)
+@@ -23,3 +28,115 @@ def synthesize(array):
+     d["min"] = numpy.amin(array)
+     d["max"] = numpy.amax(array)
+     return d
++
++#From
++#https://github.com/facebookresearch/controllable_agent/blob/main/url_benchmark/utils.py
++def weight_init(m) -> None:
++    """Custom weight init for Conv2D and Linear layers."""
++    if isinstance(m, nn.Linear):
++        nn.init.orthogonal_(m.weight.data)
++        if m.bias is not None:
++            # if hasattr(m.bias, 'data'):
++            m.bias.data.fill_(0.0)
++    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
++        gain = nn.init.calculate_gain('relu')
++        nn.init.orthogonal_(m.weight.data, gain)
++        if m.bias is not None:
++            # if hasattr(m.bias, 'data'):
++            m.bias.data.fill_(0.0)
++            
++def grad_norm(params, norm_type: float = 2.0):
++    params = [p for p in params if p.grad is not None]
++    total_norm = torch.norm(
++        torch.stack([torch.norm(p.grad.detach(), norm_type) for p in params]),
++        norm_type)
++    return total_norm.item()
++      
++class TanhTransform(pyd.transforms.Transform):
++    domain = pyd.constraints.real
++    codomain = pyd.constraints.interval(-1.0, 1.0)
++    bijective = True
++    sign = +1
++
++    def __init__(self, cache_size=1) -> None:
++        super().__init__(cache_size=cache_size)
++
++    @staticmethod
++    def atanh(x) -> torch.Tensor:
++        return 0.5 * (x.log1p() - (-x).log1p())
++
++    def __eq__(self, other):
++        return isinstance(other, TanhTransform)
++
++    def _call(self, x) -> torch.Tensor:
++        return x.tanh()
++
++    def _inverse(self, y) -> torch.Tensor:
++        # We do not clamp to the boundary here as it may degrade the performance of certain algorithms.
++        # one should use `cache_size=1` instead
++        return self.atanh(y)
++
++    def log_abs_det_jacobian(self, x, y) -> torch.Tensor:
++        # We use a formula that is more numerically stable, see details in the following link
++        # https://github.com/tensorflow/probability/commit/ef6bb176e0ebd1cf6e25c6b5cecdd2428c22963f#diff-e120f70e92e6741bca649f04fcd907b7
++        return 2. * (math.log(2.) - x - F.softplus(-2. * x))      
++      
++class SquashedNormal(pyd.transformed_distribution.TransformedDistribution):
++    def __init__(self, loc, scale) -> None:
++        self.loc = loc
++        self.scale = scale
++
++        self.base_dist = pyd.Normal(loc, scale)
++        transforms = [TanhTransform()]
++        super().__init__(self.base_dist, transforms)
++
++    @property
++    def mean(self):
++        mu = self.loc
++        for tr in self.transforms:
++            mu = tr(mu)
++        return mu
++    
++class TruncatedNormal(pyd.Normal):
++    def __init__(self, loc, scale, low=-1.0, high=1.0, eps=1e-6) -> None:
++        super().__init__(loc, scale, validate_args=False)
++        self.low = low
++        self.high = high
++        self.eps = eps
++
++    def _clamp(self, x) -> torch.Tensor:
++        clamped_x = torch.clamp(x, self.low + self.eps, self.high - self.eps)
++        x = x - x.detach() + clamped_x.detach()
++        return x
++
++    def sample(self, clip=None, sample_shape=torch.Size()) -> torch.Tensor:  # type: ignore
++        shape = self._extended_shape(sample_shape)
++        eps = _standard_normal(shape,
++                               dtype=self.loc.dtype,
++                               device=self.loc.device)
++        eps *= self.scale
++        if clip is not None:
++            eps = torch.clamp(eps, -clip, clip)
++        x = self.loc + eps
++        return self._clamp(x)
++    
++
++def soft_update_params(net, target_net, tau) -> None:
++    for param, target_param in zip(net.parameters(), target_net.parameters()):
++        target_param.data.copy_(tau * param.data +
++                                (1 - tau) * target_param.data)
++
++
++def hard_update_params(net, target_net) -> None:
++    for param, target_param in zip(net.parameters(), target_net.parameters()):
++        target_param.data.copy_(param.data)
++        
++def safe_mean(arr):
++    """
++    Compute the mean of an array if there is at least one element.
++    For empty array, return NaN. It is used for logging only.
++
++    :param arr: Numpy array or list of values
++    :return:
++    """
++    return numpy.nan if len(arr) == 0 else float(numpy.mean(arr))
+\ No newline at end of file
+diff --git a/utils/storage.py b/utils/storage.py
+index 5335964..17c445d 100644
+--- a/utils/storage.py
++++ b/utils/storage.py
+@@ -46,7 +46,44 @@ def get_model_state(model_dir):
+     return get_status(model_dir)["model_state"]
+ 
+ 
+-def get_txt_logger(model_dir):
++    
++class FileLogger(logging.Logger):
++    def __init__(self, name, filename, mode='a', level=logging.INFO, log_format=None, log_to_console=False, sformatter=None):
++        super().__init__(name, level)
++    
++        # Create a custom file handler
++        self.file_handler = logging.FileHandler(filename=filename, mode=mode)
++    
++        # Set the formatter for the file handler
++        if log_format is not None:
++            formatter = logging.Formatter(log_format, "%H:%M:%S")
++            self.file_handler.setFormatter(formatter)
++    
++        # Add the file handler to the logger
++        self.addHandler(self.file_handler)
++    
++        if log_to_console:
++            # Create a console handler
++            self.console_handler = logging.StreamHandler()  # Prints to the console
++    
++            # Set the formatter for the console handler
++            if not sformatter:
++                sformatter = formatter
++            self.console_handler.setFormatter(sformatter)
++    
++            # Add the console handler to the logger
++            self.addHandler(self.console_handler)
++    
++def get_txt_logger(model_dir, verbose):
++    path = os.path.join(model_dir, "log.txt")
++    utils.create_folders_if_necessary(path)
++
++    logger = FileLogger('__main__', path, mode='a',log_to_console=verbose,
++                        level=logging.INFO, log_format="%(message)s")
++    return logger
++    
++
++def get_txt_logger_old(model_dir, verbose):
+     path = os.path.join(model_dir, "log.txt")
+     utils.create_folders_if_necessary(path)
+ 
+@@ -58,9 +95,8 @@ def get_txt_logger(model_dir):
+             logging.StreamHandler(sys.stdout)
+         ]
+     )
+-
+     return logging.getLogger()
+-
++    
+ 
+ def get_csv_logger(model_dir):
+     csv_path = os.path.join(model_dir, "log.csv")
+diff --git a/wrappers/__init__.py b/wrappers/__init__.py
+index cb29fc3..7a02423 100644
+--- a/wrappers/__init__.py
++++ b/wrappers/__init__.py
+@@ -11,3 +11,4 @@ from .miniworld_onehot_wrapper import MiniWorldOneHotWrapper
+ from .miniworld_ssp_xy_wrapper import SSPMiniWorldXYWrapper
+ 
+ from .ssp_action_wrapper import SSPMiniActionWrapper
++from .normlize_actions import NormalizeActionWrapper
+\ No newline at end of file
+diff --git a/wrappers/minigrid_view_wrapper.py b/wrappers/minigrid_view_wrapper.py
+index 199f10d..26daeba 100644
+--- a/wrappers/minigrid_view_wrapper.py
++++ b/wrappers/minigrid_view_wrapper.py
+@@ -39,6 +39,9 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
+         domain_bounds = np.array([ [0, self.view_width-1],
+                                   [-(self.view_heigth-1)//2, (self.view_heigth-1)//2 ],
+                                   [0,3]])
++        domain_bounds = np.array([ [0, env.unwrapped.width],
++                                  [0,env.unwrapped.height],
++                                  [0,3]])
+         self.observation_space["image"] = SSPBox(
+                         low = domain_bounds[:,0],
+                         high = domain_bounds[:,1],
+@@ -68,7 +71,9 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
+         self.state_map = dict(zip(states, notice_states))
+         self.vocab.populate(';'.join([o for o in notice_states if o not in self.vocab.keys()]))
+                     
+-        
++        domain_bounds = np.array([ [0, self.view_width-1],
++                                  [-(self.view_heigth-1)//2, (self.view_heigth-1)//2 ],
++                                  [0,3]])
+         xs = [np.arange(domain_bounds[i,1],domain_bounds[i,0]-1,-1) for i in range(2)]
+         xx = np.meshgrid(*xs)
+         positions = np.array([3,6]).reshape(1,-1) - np.vstack([xx[i].reshape(-1) for i in range(2)]).T

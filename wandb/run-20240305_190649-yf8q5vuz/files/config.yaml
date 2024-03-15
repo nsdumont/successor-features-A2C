@@ -1,0 +1,189 @@
+wandb_version: 1
+
+conf:
+  desc: null
+  value: default_config.yml
+algo:
+  desc: null
+  value: a2c
+env:
+  desc: null
+  value: MiniGrid-DoorKey-6x6-v0
+model:
+  desc: null
+  value: null
+input:
+  desc: null
+  value: flat
+wrapper:
+  desc: null
+  value: ssp-xy
+env_args:
+  desc: null
+  value:
+    render_mode: rgb_array
+seed:
+  desc: null
+  value: 1
+frames:
+  desc: null
+  value: 100000
+discount:
+  desc: null
+  value: 0.99
+procs:
+  desc: null
+  value: 1
+frames_per_proc:
+  desc: null
+  value: 100
+epochs:
+  desc: null
+  value: 4
+batch_size:
+  desc: null
+  value: 256
+lr:
+  desc: null
+  value: 0.001
+log_interval:
+  desc: null
+  value: 1
+save_interval:
+  desc: null
+  value: 10
+n_test_episodes:
+  desc: null
+  value: 10
+load_optimizer_state:
+  desc: null
+  value: false
+plot:
+  desc: null
+  value: false
+verbose:
+  desc: null
+  value: true
+lr_f:
+  desc: null
+  value: 0.001
+lr_a:
+  desc: null
+  value: 0.001
+lr_sr:
+  desc: null
+  value: 0.001
+lr_r:
+  desc: null
+  value: 0.0001
+normalize_embeddings:
+  desc: null
+  value: false
+feature_learn:
+  desc: null
+  value: cm
+recurrence:
+  desc: null
+  value: 1
+text:
+  desc: null
+  value: false
+gae_lambda:
+  desc: null
+  value: 0.95
+entropy_coef:
+  desc: null
+  value: 0.0005
+entropy_decay:
+  desc: null
+  value: 0
+memory_cap:
+  desc: null
+  value: 100000
+dissim_coef:
+  desc: null
+  value: 0.0
+value_loss_coef:
+  desc: null
+  value: 0.5
+max_grad_norm:
+  desc: null
+  value: 10
+optim_eps:
+  desc: null
+  value: 1.0e-08
+optim_alpha:
+  desc: null
+  value: 0.99
+clip_eps:
+  desc: null
+  value: 0.2
+ssp_dim:
+  desc: null
+  value: 151
+ssp_h:
+  desc: null
+  value: null
+critic_hidden_size:
+  desc: null
+  value: 64
+actor_hidden_size:
+  desc: null
+  value: 64
+feature_hidden_size:
+  desc: null
+  value: 128
+feature_size:
+  desc: null
+  value: 64
+feature_learn_hidden_size:
+  desc: null
+  value: 64
+wandb:
+  desc: null
+  value: true
+wandb_project_name:
+  desc: null
+  value: ssp-rl
+wandb_entity:
+  desc: null
+  value: nicole-s-dumont
+wandb_tags:
+  desc: null
+  value:
+  - ssp-obs
+normlize_embeddings:
+  desc: null
+  value: false
+mem:
+  desc: null
+  value: false
+_wandb:
+  desc: null
+  value:
+    code_path: code/train.py
+    python_version: 3.10.12
+    cli_version: 0.16.3
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    start_time: 1709683609.031765
+    t:
+      1:
+      - 1
+      - 55
+      2:
+      - 1
+      - 55
+      3:
+      - 2
+      - 13
+      - 15
+      - 16
+      - 23
+      - 35
+      4: 3.10.12
+      5: 0.16.3
+      8:
+      - 5
+      13: linux-x86_64

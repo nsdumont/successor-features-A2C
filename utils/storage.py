@@ -46,7 +46,44 @@ def get_model_state(model_dir):
     return get_status(model_dir)["model_state"]
 
 
-def get_txt_logger(model_dir):
+    
+class FileLogger(logging.Logger):
+    def __init__(self, name, filename, mode='a', level=logging.INFO, log_format=None, log_to_console=False, sformatter=None):
+        super().__init__(name, level)
+    
+        # Create a custom file handler
+        self.file_handler = logging.FileHandler(filename=filename, mode=mode)
+    
+        # Set the formatter for the file handler
+        if log_format is not None:
+            formatter = logging.Formatter(log_format, "%H:%M:%S")
+            self.file_handler.setFormatter(formatter)
+    
+        # Add the file handler to the logger
+        self.addHandler(self.file_handler)
+    
+        if log_to_console:
+            # Create a console handler
+            self.console_handler = logging.StreamHandler()  # Prints to the console
+    
+            # Set the formatter for the console handler
+            if not sformatter:
+                sformatter = formatter
+            self.console_handler.setFormatter(sformatter)
+    
+            # Add the console handler to the logger
+            self.addHandler(self.console_handler)
+    
+def get_txt_logger(model_dir, verbose):
+    path = os.path.join(model_dir, "log.txt")
+    utils.create_folders_if_necessary(path)
+
+    logger = FileLogger('__main__', path, mode='a',log_to_console=verbose,
+                        level=logging.INFO, log_format="%(message)s")
+    return logger
+    
+
+def get_txt_logger_old(model_dir, verbose):
     path = os.path.join(model_dir, "log.txt")
     utils.create_folders_if_necessary(path)
 
@@ -58,9 +95,8 @@ def get_txt_logger(model_dir):
             logging.StreamHandler(sys.stdout)
         ]
     )
-
     return logging.getLogger()
-
+    
 
 def get_csv_logger(model_dir):
     csv_path = os.path.join(model_dir, "log.csv")

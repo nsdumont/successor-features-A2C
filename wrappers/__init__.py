@@ -11,3 +11,4 @@ from .miniworld_onehot_wrapper import MiniWorldOneHotWrapper
 from .miniworld_ssp_xy_wrapper import SSPMiniWorldXYWrapper
 
 from .ssp_action_wrapper import SSPMiniActionWrapper
+from .normlize_actions import NormalizeActionWrapper

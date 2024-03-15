@@ -6,7 +6,7 @@ import numpy as np
 
 from utils import default_preprocess_obss, DictList, ParallelEnv
 # from algos.blr import BayesianLinearRegression 
-
+from gymnasium.spaces.dict import Dict
 
 class BaseAlgo(ABC):
     """The base class for RL algorithms."""
@@ -63,6 +63,7 @@ class BaseAlgo(ABC):
         self.preprocess_obss = preprocess_obss or default_preprocess_obss
         self.reshape_reward = reshape_reward
         self.continuous_action = model.continuous_action
+        self.dissim_coef=dissim_coef
 
         # Control parameters
 
@@ -85,8 +86,10 @@ class BaseAlgo(ABC):
 
         self.obs = self.env.reset()
         self.obss = [None]*(shape[0])
+        self.preprocessed_obss = [None]*(shape[0])
         if self.model.recurrent:
             self.memory = torch.zeros(shape[1], self.model.memory_size, device=self.device)
+            self.target_memory = torch.zeros(shape[1], self.model.memory_size, device=self.device)
             self.memories = torch.zeros(*shape, self.model.memory_size, device=self.device)
         self.mask = torch.ones(shape[1], device=self.device)
         self.masks = torch.zeros(*shape, device=self.device)
@@ -98,7 +101,17 @@ class BaseAlgo(ABC):
         self.rewards = torch.zeros(*shape, device=self.device)
         self.advantages = torch.zeros(*shape, device=self.device)
         self.log_probs = torch.zeros(*shape, device=self.device)
-
+        if dissim_coef>0:
+            if type(envs[0].observation_space)==Dict:
+                self.obs_mean =  torch.zeros( envs[0].observation_space['image'].shape_out,   device=self.device)
+            else:
+                self.obs_mean =  torch.zeros(envs[0].observation_space.shape_out, device=self.device)
+        
+        #     if type(envs[0].observation_space)==Dict:
+        #         self.sigma =  torch.zeros(shape[1], envs[0].observation_space['image'].shape_out,  envs[0].observation_space['image'].shape_out, device=self.device)
+        #     else:
+        #         self.sigma =  torch.zeros(shape[1], envs[0].observation_space.shape_out,  envs[0].observation_space.shape_out, device=self.device)
+        
         # Initialize log values
 
         self.log_episode_return = torch.zeros(self.num_procs, device=self.device)
@@ -110,7 +123,6 @@ class BaseAlgo(ABC):
         self.log_reshaped_return = [0] * self.num_procs
         self.log_num_frames = [0] * self.num_procs
         
-        self.dissim_coef=dissim_coef
         
         # self.use_blr=use_blr
         # if use_blr:
@@ -163,6 +175,10 @@ class BaseAlgo(ABC):
             # Update experiences values
 
             self.obss[i] = self.obs
+            if self.dissim_coef > 0:
+                self.obs_mean += self.discount*preprocessed_obs.image.sum(axis=0) #old version: no discount
+            # self.sigma += self.discount * torch.bmm(preprocessed_obs.image.unsqueeze(2), preprocessed_obs.image.unsqueeze(1))
+            self.preprocessed_obss[i] = preprocessed_obs
             self.obs = obs
             if self.model.recurrent:
                 self.memories[i] = self.memory
@@ -215,12 +231,17 @@ class BaseAlgo(ABC):
             else:
                 _, next_value = self.model(preprocessed_obs)
 
-        if self.dissim_coef != 0:
-            vec_obs = np.stack([np.stack([self.obss[i][j]['image']
+        if self.dissim_coef > 0:
+            vec_obs = torch.stack([torch.stack([self.preprocessed_obss[i][j].image
                         for j in range(self.num_procs) ]) for i in range(self.num_frames_per_proc)])
-            mu=vec_obs.sum(axis=(0,1))
-            mu /= np.linalg.norm(mu)
-            sims = torch.from_numpy((vec_obs @ mu)**2).to(self.device)
+            # vec_obs = torch.stack([torch.stack([self.preprocessed_obss[j][i].image
+            #             for j in range(self.num_frames_per_proc) ]) for i in range(self.num_procs)])
+            
+            # self.intrinsic_rewards = torch.diagonal(torch.bmm(vec_obs, torch.bmm(self.sigma, torch.swapaxes(vec_obs,1,2))), dim1=1,dim2=2)
+            # mu=vec_obs.sum(axis=(0,1))
+            #mu /= torch.linalg.norm(mu)
+            #sims = (vec_obs @ mu)**2
+            sims = vec_obs @ (self.obs_mean/torch.linalg.norm(self.obs_mean))  #old version: self.obs_mean \= self.norm; sims are squared
             self.intrinsic_rewards = self.dissim_coef*(1-sims)
         else:
             self.intrinsic_rewards = torch.zeros(self.rewards.shape, device=self.device)

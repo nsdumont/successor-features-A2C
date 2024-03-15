@@ -3,39 +3,38 @@ import torch
 import torch.nn.functional as F
 import itertools
 import torch.autograd
-from torch.autograd import Variable
 from utils import DictList
 
 from algos.baseSR import BaseSRAlgo
 
+import sys,os
+sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
+from utils import soft_update_params
 
 class SRPPOAlgo(BaseSRAlgo):
 
-    def __init__(self, envs, model,target, feature_learn="curiosity", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
-        lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, entropy_coef=0.01,  recon_loss_coef=1,norm_loss_coef=1,
-        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200, epochs=4, batch_size=256, clip_eps=0.2, preprocess_obss=None, reshape_reward=None,use_V_advantage=False):
+    def __init__(self, envs, model, feature_learn="cm", device=None, num_frames_per_proc=None, discount=0.99,  lr_feature=0.01,
+        lr_actor = 0.01,lr_sr=0.01, lr_reward= 0.01/30, gae_lambda=0.95, dissim_coef=0.01, entropy_coef=0.01, entropy_decay=0, recon_loss_coef=1,
+        max_grad_norm=10, recurrence=1,rmsprop_alpha=0.99, rmsprop_eps=1e-8,memory_cap=200, epochs=4, batch_size=256, clip_eps=0.2, preprocess_obss=None, reshape_reward=None,use_V_advantage=True):
  
         num_frames_per_proc = num_frames_per_proc or 200
 
-        super().__init__(envs, model, target, device, num_frames_per_proc, discount,  lr_feature, gae_lambda, max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
+        super().__init__(envs, model, device, num_frames_per_proc, discount,  lr_feature, gae_lambda, max_grad_norm, recurrence, memory_cap, preprocess_obss, reshape_reward)
       
         #torch.autograd.set_detect_anomaly(True)
         
-        self.norm_loss_coef = norm_loss_coef
+        self.dissim_coef = dissim_coef
         self.entropy_coef = entropy_coef
+        self.entropy_decay, = entropy_decay
         self.recon_loss_coef = recon_loss_coef
         self.feature_learn = feature_learn
         self.clip_eps = clip_eps
         self.batch_size=batch_size
         self.use_V_advantage= use_V_advantage
         self.epochs = epochs
-        #params = [self.model.feature_in.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
-        #self.feature_params = itertools.chain(*params)
-        
-        #self.feature_optimizer = torch.optim.RMSprop(self.feature_params, lr,alpha=rmsprop_alpha, eps=rmsprop_eps)
 
-        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},
-                                                      {'params': self.model.feature_out.parameters()} ],
+        self.feature_optimizer = torch.optim.RMSprop([{'params': self.model.feature_net.parameters()},
+                                                      {'params': self.model.feature_learner.parameters()} ],
                                                      lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
         self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
                                           lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
@@ -43,12 +42,10 @@ class SRPPOAlgo(BaseSRAlgo):
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
                                           lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps, weight_decay=0.0)
           
-        self.reward_optimizer = torch.optim.RMSprop([{'params': self.model.feature_in.parameters()},{'params': self.model.reward.parameters()}],
+        self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
                                           lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) #30
         
-        #self.optimizer =  torch.optim.RMSprop(self.model.parameters(),
-         #                                 lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps) 
-        
+
         self.batch_num = 0
  
     def update_parameters(self, exps):
@@ -83,35 +80,20 @@ class SRPPOAlgo(BaseSRAlgo):
                     sb = exps[inds + i]
                      
                     # Compute loss
-                    if self.model.use_memory:
-                        _, _, _, predictions, _, _, _,_ = self.model(sb[:-1].obs, sb[:-1].action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
+                    if not self.model.continuous_action:
+                        processed_action = F.one_hot(sb[:-1].action.long(),self.model.n_actions)
                     else:
-                        _, _, _, predictions, _, _,_ = self.model(sb[:-1].obs,sb[:-1].action,sb[1:].obs)
-                      
+                        processed_action = sb[:-1].action
+                    if self.model.use_memory:
+                        _, _, _, feature_loss, _, _, _ = self.model(sb[:-1].obs,processed_action, sb[1:].obs, memory[:-1,:] * sb.mask[:-1])
+                    else:
+                        _, _, _, feature_loss, _, _, _ = self.model(sb[:-1].obs, processed_action,sb[1:].obs)
+             
                     if self.model.use_memory:
                         dist, value, embedding, _, successor, _,_, memory = self.model(sb.obs,memory= memory * sb.mask)
                     else:
                         dist, value, embedding, _, successor, _,_ = self.model(sb.obs)
-                             
-                    if self.feature_learn == "reconstruction":
-                        reconstruction_loss = F.mse_loss(predictions, sb.obs[:-1].image)
-                    elif self.feature_learn=="curiosity":
-                        next_embedding, next_obs_pred, action_pred = predictions
-                        forward_loss = F.mse_loss(next_obs_pred , next_embedding)
-                        if self.model.continuous_action:
-                            inverse_loss = F.mse_loss(action_pred.reshape(-1),sb[:-1].action.float())
-                        else:
-                            inverse_loss = F.nll_loss(action_pred, sb[:-1].action.long()) # mse if continuous action
-                        reconstruction_loss = forward_loss + inverse_loss 
-    
-                    if self.feature_learn != "none":
-                        norm_loss = (torch.norm(embedding, dim=1) - 1).pow(2).mean()
-                        feature_loss = reconstruction_loss + self.norm_loss_coef*norm_loss 
-                    else:
-                        reconstruction_loss = torch.Tensor(np.zeros(1))
-                        norm_loss = torch.Tensor(np.zeros(1))
-                        feature_loss = torch.Tensor(np.zeros(1))                
-
+                    
                     
                     
                     sr_clipped = sb.successor + torch.clamp(successor - sb.successor, -self.clip_eps, self.clip_eps)
@@ -173,12 +155,13 @@ class SRPPOAlgo(BaseSRAlgo):
                 # Update feature embedding net
                 if self.feature_learn != "none":
                     self.feature_optimizer.zero_grad()
-                    #update_loss = update_feature_loss + update_reward_loss
                     batch_feature_loss.backward(retain_graph=True)
-                    update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_in.parameters()) ** 0.5
-                    torch.nn.utils.clip_grad_norm_(self.model.feature_in.parameters(), self.max_grad_norm)
-                    torch.nn.utils.clip_grad_norm_(self.model.feature_out.parameters(), self.max_grad_norm)
+                    update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_net.parameters()) ** 0.5
+                    torch.nn.utils.clip_grad_norm_(self.model.feature_net.parameters(), self.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(self.model.feature_net.parameters(), self.max_grad_norm)
                     self.feature_optimizer.step()
+                    
+                    soft_update_params(self.model.feature_net, self.target_feature_net, 0.01)
                 else:
                     update_grad_norm_features = torch.Tensor(np.zeros(1))
                 
@@ -215,7 +198,7 @@ class SRPPOAlgo(BaseSRAlgo):
                 log_grad_norms.append(grad_norm)
     
         # Log some values
-    
+        self.entropy_coef = self.entropy_coef*(1-self.entropy_decay)
         logs = {
             "entropy": np.mean(log_entropies),
             "reward_loss": np.mean(log_reward_losses),
@@ -257,7 +240,7 @@ class SRPPOAlgo(BaseSRAlgo):
         return batches_starting_indexes
     
     def _get_feature_params(self):
-        params = [self.model.feature_in.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
+        params = [self.model.feature_net.parameters(), self.model.feature_out.parameters(), self.model.actor.parameters()]
         return itertools.chain(*params)
 
 

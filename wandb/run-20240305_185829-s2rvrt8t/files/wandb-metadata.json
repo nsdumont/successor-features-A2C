@@ -1,0 +1,130 @@
+{
+    "os": "Linux-5.4.0-150-generic-x86_64-with-glibc2.27",
+    "python": "3.10.12",
+    "heartbeatAt": "2024-03-05T23:58:30.194744",
+    "startedAt": "2024-03-05T23:58:29.777312",
+    "docker": null,
+    "cuda": null,
+    "args": [
+        "--env",
+        "MiniGrid-DoorKey-6x6-v0",
+        "--algo",
+        "a2c",
+        "--frames",
+        "100000",
+        "--wrapper",
+        "ssp-xy",
+        "--input",
+        "flat",
+        "--procs",
+        "1",
+        "--frames-per-proc",
+        "100",
+        "--wandb",
+        "--wandb-project-name",
+        "ssp-rl",
+        "--wandb-entity",
+        "nicole-s-dumont",
+        "--wandb-tags",
+        "ssp-obs"
+    ],
+    "state": "running",
+    "program": "/home/ns2dumon/Documents/Github/successor-features-A2C/train.py",
+    "codePathLocal": "train.py",
+    "codePath": "train.py",
+    "git": {
+        "remote": "git@github.com:nsdumont/successor-features-A2C.git",
+        "commit": "9efd744d36e715a322fd1af6510494da0cf184b2"
+    },
+    "email": "nicole.s.dumont@gmail.com",
+    "root": "/home/ns2dumon/Documents/Github/successor-features-A2C",
+    "host": "ctn17",
+    "username": "ns2dumon",
+    "executable": "/home/ns2dumon/anaconda3/envs/sr-torch/bin/python",
+    "cpu_count": 6,
+    "cpu_count_logical": 12,
+    "cpu_freq": {
+        "current": 1576.2719166666668,
+        "min": 1200.0,
+        "max": 3800.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 1296.244,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 2014.41,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1490.953,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 2301.812,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1395.939,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1206.813,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1297.216,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1594.929,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1461.896,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1973.509,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1642.612,
+            "min": 1200.0,
+            "max": 3800.0
+        },
+        {
+            "current": 1238.93,
+            "min": 1200.0,
+            "max": 3800.0
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 423.95521545410156,
+            "used": 37.08739471435547
+        }
+    },
+    "gpu": "NVIDIA GeForce GTX 980",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce GTX 980",
+            "memory_total": 4236967936
+        }
+    ],
+    "memory": {
+        "total": 31.261337280273438
+    }
+}

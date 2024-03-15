@@ -14,6 +14,27 @@ from minigrid.core.constants import (
 
 IDX_TO_STATE = {v: k for k, v in STATE_TO_IDX.items()}
 
+#AGENT_DIR_TO_STR = {0: ">", 1: "V", 2: "<", 3: "^"}
+#COLOR_TO_IDX = {"red": 0, "green": 1, "blue": 2, "purple": 3, "yellow": 4, "grey": 5
+# OBJECT_TO_IDX = {
+#     "unseen": 0,
+#     "empty": 1,
+#     "wall": 2,
+#     "floor": 3,
+#     "door": 4,
+#     "key": 5,
+#     "ball": 6,
+#     "box": 7,
+#     "goal": 8,
+#     "lava": 9,
+#     "agent": 10,
+# }
+# STATE_TO_IDX = {
+#     "open": 0,
+#     "closed": 1,
+#     "locked": 2,
+# }
+
 import sys,os
 sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
 from spaces import SSPBox, SSPDiscrete, SSPSequence, SSPDict
@@ -38,6 +59,9 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         self.view_heigth = env.observation_space['image'].shape[1]
         domain_bounds = np.array([ [0, self.view_width-1],
                                   [-(self.view_heigth-1)//2, (self.view_heigth-1)//2 ],
+                                  [0,3]])
+        domain_bounds = np.array([ [0, env.unwrapped.width],
+                                  [0,env.unwrapped.height],
                                   [0,3]])
         self.observation_space["image"] = SSPBox(
                         low = domain_bounds[:,0],
@@ -68,7 +92,9 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         self.state_map = dict(zip(states, notice_states))
         self.vocab.populate(';'.join([o for o in notice_states if o not in self.vocab.keys()]))
                     
-        
+        domain_bounds = np.array([ [0, self.view_width-1],
+                                  [-(self.view_heigth-1)//2, (self.view_heigth-1)//2 ],
+                                  [0,3]])
         xs = [np.arange(domain_bounds[i,1],domain_bounds[i,0]-1,-1) for i in range(2)]
         xx = np.meshgrid(*xs)
         positions = np.array([3,6]).reshape(1,-1) - np.vstack([xx[i].reshape(-1) for i in range(2)]).T

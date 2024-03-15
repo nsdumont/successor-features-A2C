@@ -8,7 +8,7 @@ class A2CAlgo(BaseAlgo):
     """The Advantage Actor-Critic algorithm."""
 
     def __init__(self, envs, model, device=None, num_frames_per_proc=None, discount=0.99, lr=0.01, gae_lambda=0.95,
-                 entropy_coef=0.01, entropy_decay=0.99,value_loss_coef=0.5, dissim_coef=0, max_grad_norm=0.5, recurrence=4,
+                 entropy_coef=0.01, entropy_decay=0,value_loss_coef=0.5, dissim_coef=0, max_grad_norm=0.5, recurrence=4,
                  rmsprop_alpha=0.99, rmsprop_eps=1e-8, preprocess_obss=None, reshape_reward=None):
         num_frames_per_proc = num_frames_per_proc or 8
 
@@ -77,12 +77,12 @@ class A2CAlgo(BaseAlgo):
 
         self.optimizer.zero_grad()
         update_loss.backward()
-        update_grad_norm = sum(p.grad.data.norm(2) ** 2 for p in self.model.parameters()) ** 0.5
+        update_grad_norm = sum(p.grad.data.norm(2) ** 2 if p.requires_grad else 0 for p in self.model.parameters()) ** 0.5
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
         self.optimizer.step()
 
         # Log some values
-        self.entropy_coef = self.entropy_coef*self.entropy_decay
+        self.entropy_coef = self.entropy_coef*(1-self.entropy_decay)
         logs = {
             "entropy": update_entropy,
             "value": update_value,

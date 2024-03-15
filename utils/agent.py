@@ -2,7 +2,7 @@ import torch
 
 import utils
 from models.model import ACModel
-from models.model_SR import SRModel
+from models.sr_model import SRModel
 
 
 class Agent:
@@ -12,15 +12,19 @@ class Agent:
     - to choose an action given an observation,
     - to analyze the feedback (i.e. reward and done state) of its action."""
 
-    def __init__(self, obs_space, action_space, model_dir, model_name = 'AC',
+    def __init__(self, obs_space, action_space, model_dir, model_name = 'a2c',
                  device=None, argmax=False, num_envs=1, use_memory=False, 
-                 use_text=False,input_type="image", feature_learn="curiosity"):
-        obs_space, self.preprocess_obss = utils.get_obss_preprocessor(obs_space)
-        if model_name == 'ac':
-            self.acmodel = ACModel(obs_space, action_space, use_memory=use_memory, use_text=use_text)
-        elif model_name == 'sr':
+                 use_text=False,input_type="image", feature_learn="curiosity",preprocess_obss=None):
+        if preprocess_obss is None:
+            obs_space, self.preprocess_obss = utils.get_obss_preprocessor(obs_space)
+        else:
+            self.preprocess_obss = preprocess_obss
+        if "sr" in model_name:
             self.acmodel = SRModel(obs_space, action_space, device, input_type=input_type,
                                    use_memory=use_memory, use_text=use_text,feature_learn=feature_learn)
+        else:
+            self.acmodel = ACModel(obs_space, action_space, input_type=input_type, use_memory=use_memory, use_text=use_text)
+            
         self.model_name = model_name
         self.device = device
         self.argmax = argmax
@@ -36,19 +40,23 @@ class Agent:
             self.preprocess_obss.vocab.load_vocab(utils.get_vocab(model_dir))
 
     def get_actions(self, obss):
+        if self.acmodel.continuous_action:
+            obss = [o for o in self.acmodel.scaler.transform(obss)]
+            
         preprocessed_obss = self.preprocess_obss(obss, device=self.device)
 
         with torch.no_grad():
-            if self.model_name == 'ac':
+            if 'sr' in self.model_name:
+                if self.acmodel.use_memory:
+                    dist, _, _, _, _, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
+                else:
+                    dist, _, _, _, _, _ = self.acmodel(preprocessed_obss)
+            else:
                 if self.acmodel.recurrent:
                     dist, _, self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
                 else:
                     dist, _ = self.acmodel(preprocessed_obss)
-            elif self.model_name == 'sr':
-                if self.acmodel.recurrent:
-                    dist, _, _, _, _, _, _,self.memories = self.acmodel(preprocessed_obss, memory=self.memories)
-                else:
-                    dist, _, _, _, _, _,_ = self.acmodel(preprocessed_obss)
+                
 
 
         if self.argmax:

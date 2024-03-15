@@ -9,13 +9,13 @@ class PPOAlgo(BaseAlgo):
     ([Schulman et al., 2015](https://arxiv.org/abs/1707.06347))."""
 
     def __init__(self, envs, model, device=None, num_frames_per_proc=None, discount=0.99, lr=0.001, gae_lambda=0.95,
-                 entropy_coef=0.01, entropy_decay=0.99, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
+                 entropy_coef=0.01, entropy_decay=0, value_loss_coef=0.5, dissim_coef=0, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-8, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
                  reshape_reward=None):
         num_frames_per_proc = num_frames_per_proc or 128
 
         super().__init__(envs, model, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,entropy_decay,
-                         value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward)
+                         value_loss_coef, dissim_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward)
 
         self.clip_eps = clip_eps
         self.epochs = epochs
@@ -116,7 +116,7 @@ class PPOAlgo(BaseAlgo):
                 log_grad_norms.append(grad_norm)
 
         # Log some values
-        self.entropy_coef = self.entropy_coef*self.entropy_decay
+        self.entropy_coef = self.entropy_coef*(1-self.entropy_decay)
         logs = {
             "entropy": numpy.mean(log_entropies),
             "value": numpy.mean(log_values),

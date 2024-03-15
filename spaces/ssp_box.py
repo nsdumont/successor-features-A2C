@@ -20,6 +20,7 @@ class SSPBox(Space[np.ndarray]):
         seed: Optional[Union[int, np.random.Generator]] = None,
         ssp_space = None,
         decoder_method: Optional[str] = 'network-optim',
+        length_scale=None,
         **kwargs
     ):
         r"""Constructor of :class:`SSPBox`.
@@ -75,7 +76,7 @@ class SSPBox(Space[np.ndarray]):
 
         low = _broadcast(low, dtype, shape_in, inf_sign="-")  # type: ignore
         high = _broadcast(high, dtype, shape_in, inf_sign="+")  # type: ignore
-
+        
         assert isinstance(low, np.ndarray)
         assert (
             low.shape == shape_in
@@ -99,17 +100,24 @@ class SSPBox(Space[np.ndarray]):
         self.low_repr = _short_repr(self.low)
         self.high_repr = _short_repr(self.high)
         
+        # From Kathyrn
+        if length_scale is None:
+            length_scale = np.clip( ( np.abs(np.atleast_2d( high - low )) ).T,a_min = 1e-8, a_max = 1e8) / 10.
+        #
+        
         if (ssp_space is None) or (ssp_space=='hex'):
             self.ssp_space = HexagonalSSPSpace(
                                 self.shape_in[0],
                                 ssp_dim=self.shape_out, 
                                 domain_bounds=self.bounds, seed=seed,
+                                length_scale=length_scale,
                                 **kwargs)
         elif (ssp_space=='rand'):
             self.ssp_space = RandomSSPSpace(
                                 self.shape_in[0],
                                 ssp_dim=self.shape_out, 
                                 domain_bounds=self.bounds, seed=seed,
+                                length_scale=length_scale,
                                 **kwargs)
         else:
             self.ssp_space = ssp_space
