@@ -1,4 +1,5 @@
 storage/*
+wandb/*
 *.pdf
 
 # Byte-compiled / optimized / DLL files
