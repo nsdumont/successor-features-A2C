@@ -398,7 +398,7 @@ def run(args=None,**kwargs):
         txt_logger.info("Average test return: " + str(np.mean(test_episode_returns)) 
                         + " (" + str(np.min(test_episode_returns)) + ", " + str(np.max(test_episode_returns)) + ")")
     else:
-        test_episode_returns = None
+        test_episode_returns = data[4]
     
     if args.wandb:
         wandbrun.finish()

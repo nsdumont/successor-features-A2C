@@ -176,7 +176,8 @@ class BaseAlgo(ABC):
 
             self.obss[i] = self.obs
             if self.dissim_coef > 0:
-                self.obs_mean += self.discount*preprocessed_obs.image.sum(axis=0) #old version: no discount
+                self.obs_mean += preprocessed_obs.image.sum(axis=0) #old version: no discount
+                self.obs_mean /= torch.linalg.norm(self.obs_mean)
             # self.sigma += self.discount * torch.bmm(preprocessed_obs.image.unsqueeze(2), preprocessed_obs.image.unsqueeze(1))
             self.preprocessed_obss[i] = preprocessed_obs
             self.obs = obs
