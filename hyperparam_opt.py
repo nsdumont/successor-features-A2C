@@ -45,9 +45,12 @@ def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=1, discoun
         if 'ssp' in wrapper:
             dissim_coef = 0.0#trial.suggest_float("dissim_coef", 0.0, 0.1)
             ssp_dim = trial.suggest_categorical("ssp_dim", [2*(domain_dim+1)*(i**2) + 1 for i in range(2,8)])
-            ssp_h = trial.suggest_float("ssp_h", 0.0001, 100, log=True)
+            ssp_h = [1.0] * domain_dim
+            for i in range(domain_dim):
+                ssp_h[i] = trial.suggest_float(f"ssp_h_{i}", 0.0001, 100, log=True)
         elif 'ssp' in input:
             dissim_coef= 0.0
+            ssp_h=1.0
             ssp_dim = trial.suggest_categorical("ssp_dim", [2*(domain_dim+1)*(i**2) + 1 for i in range(2,8)])
         else:
             dissim_coef=0.0
