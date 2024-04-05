@@ -7,16 +7,13 @@ from train import run
 import utils
 
 
-models = ['plot_8x8_ppo_image','plot_8x8_ppo_xy', 'plot_8x8_ppo_ssp-view']
+models = ['plot_8x8_ppo_image', 'plot_8x8_ppo_ssp-view']
           #'plot_8x8_a2c_image','plot_8x8_a2c_xy', 'plot_8x8_a2c_ssp-xy',  'plot_8x8_a2c_ssp-view']
           # 'plot_8x8_sr_image','plot_8x8_sr_xy', 'plot_8x8_sr_ssp-xy', 'plot_8x8_sr_ssp-view',
           # 'plot_8x8_sr-ppo_image', 'plot_8x8_sr-ppo_xy', 'plot_8x8_sr-ppo_ssp-xy','plot_8x8_sr-ppo_ssp-view' ]
-env_name = "MiniGrid-DoorKey-5x5-v0"
+env_name = "MiniGrid-Unlock-v0"
 
-n_seeds = 3
-replace_existing = True
-
-        
+  
 for i,model_name in enumerate(models):
     print("Starting "+ model_name )
     algo = model_name.split("_")[2]
@@ -45,7 +42,7 @@ for i,model_name in enumerate(models):
         else:
             wrapper_args={}
         run(algo = algo, input=input_type, wrapper=wrapper, model = _model_name,seed=seed,
-              env=env_name, frames=60000, entropy_coef=0.0005, verbose=False,
+              env=env_name, frames=100000, entropy_coef=0.0005, verbose=False,
               wrapper_args=wrapper_args)
         
     print("Finsihed "+ model_name )

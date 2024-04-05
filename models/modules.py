@@ -200,7 +200,7 @@ class SSPProcesser(nn.Module):
             self.length_scale = torch.nn.Parameter(torch.ones(self.input_dim), requires_grad=True)
         elif basis_type=='learn':
             ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size) # initial
-            self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
+            self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=True)
             self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
             # raise Exception("Learning the full phase matrix of the SSP encosing is not yet implemented") 
         
