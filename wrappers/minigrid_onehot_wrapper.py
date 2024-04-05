@@ -49,7 +49,7 @@ class MazeOneHotWrapper(gym.ObservationWrapper):
         self.height_size = env.unwrapped.maze_view.maze.MAZE_H
         self.size = self.width_size*self.height_size
         # Set-up observation space
-        self.observation_space["image"] = Box(
+        self.observation_space = Box(
                         low = np.zeros(self.size),
                         high = np.ones(self.size),
                         dtype=np.float32,
