@@ -49,6 +49,9 @@ def run(args=None,**kwargs):
         config.update(kwargs) # 
         args = argparse.Namespace(**config)
     
+    if not hasattr(args, "wrapper_args"):
+        args.wrapper_args = {}
+    
     args.mem = args.recurrence > 1
     args.lr_a = args.lr_a or args.lr
     args.lr_sr = args.lr_sr or args.lr
@@ -101,34 +104,39 @@ def run(args=None,**kwargs):
         for i in range(args.procs):
             envs.append( SSPEnvWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
                                 auto_convert_obs_space = True,auto_convert_action_space=False, shape_out = args.ssp_dim, length_scale=args.ssp_h,
-                                decoder_method = 'from-set'))
+                                decoder_method = 'from-set', **args.wrapper_args))
     elif ('MiniGrid' in args.env) or ('BabyAI' in args.env):
         if (args.wrapper =='xy'):
             from wrappers import MiniGridXYWrapper
             for i in range(args.procs):
-                envs.append( MiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
+                envs.append( MiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
+                                               seed=args.seed, **args.wrapper_args))
         elif (args.wrapper =='one-hot'):
             from wrappers import MiniGridOneHotWrapper
             for i in range(args.procs):
-                envs.append( MiniGridOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed))
+                envs.append( MiniGridOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), 
+                                                   seed=args.seed, **args.wrapper_args))
         elif (args.wrapper =='ssp-xy'):
             from wrappers import SSPMiniGridXYWrapper
             for i in range(args.procs): #***
                 # envs.append( SSPMiniActionWrapper(SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
                 #                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'), 
                 #                                   seed=args.seed, shape_out=args.ssp_dim) )
-                envs.append( SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+                envs.append( SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
+                                                  seed=args.seed, **args.wrapper_args,
                                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set') )
         elif(args.wrapper =='ssp-view'):
             from wrappers import SSPMiniGridViewWrapper
             for i in range(args.procs):
-                envs.append( SSPMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
+                envs.append( SSPMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
+                                                    seed=args.seed+ 10000 * i, **args.wrapper_args,
                                      shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )    
         elif(args.wrapper =='ssp-lang'):
              from wrappers import SSPBabyAIViewWrapper
              for i in range(args.procs):
-                 envs.append( SSPBabyAIViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
-                                      shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )  
+                 envs.append( SSPBabyAIViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
+                                                   seed=args.seed, shape_out = args.ssp_dim, 
+                                                   length_scale=args.ssp_h, decoder_method = 'from-set', **args.wrapper_args,) )  
         else:
             exec(f"from minigrid.wrappers import {args.wrapper} as wrapper")
             for i in range(args.procs):
@@ -443,6 +451,8 @@ if __name__ == "__main__":
     parser.add_argument("--wrapper", type=str, default="none",
                         help="format of input:  none | ssp-xy | ssp-auto | one-hot | FullyObsWrapper | RGBImgObsWrapper | OneHotPartialObsWrapper | DirectionObsWrapper (default: non)")
     parser.add_argument("--env-args", type=yaml.load, default={'render_mode': 'rgb_array'},
+                        help="")
+    parser.add_argument("--wrapper-args", type=yaml.load, default={},
                         help="")
 
     # General algo parameters

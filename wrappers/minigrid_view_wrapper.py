@@ -46,6 +46,8 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         env: gym.Env,
         ssp_space = None,
         shape_out = None,
+        ignore = ['WALL', 'FLOOR'],
+        notice = None,
         **kwargs
     ):
         
@@ -83,7 +85,9 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         self.vocab.populate(';'.join(colors))
         
         objects = [x for x in list(OBJECT_TO_IDX.keys())]
-        notice_obj = ['NULL', 'NULL', 'NULL', 'NULL', 'DOOR', 'KEY', 'BALL', 'BOX', 'GOAL', 'LAVA', 'NULL']
+        notice_obj =[x if x not in ignore else 'NULL' for x in ['UNSEEN', 'NULL', 'WALL', 'FLOOR',
+                                                                'DOOR', 'KEY', 'BALL', 'BOX', 'GOAL',
+                                                                'LAVA', 'NULL']]
         self.obj_map = dict(zip(objects, notice_obj))
         self.vocab.populate(';'.join([o for o in notice_obj if o not in self.vocab.keys()]))
         

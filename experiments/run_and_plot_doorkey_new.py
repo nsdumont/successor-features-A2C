@@ -11,11 +11,10 @@ models = ['plot_8x8_ppo_image','plot_8x8_ppo_xy', 'plot_8x8_ppo_ssp-view']
           #'plot_8x8_a2c_image','plot_8x8_a2c_xy', 'plot_8x8_a2c_ssp-xy',  'plot_8x8_a2c_ssp-view']
           # 'plot_8x8_sr_image','plot_8x8_sr_xy', 'plot_8x8_sr_ssp-xy', 'plot_8x8_sr_ssp-view',
           # 'plot_8x8_sr-ppo_image', 'plot_8x8_sr-ppo_xy', 'plot_8x8_sr-ppo_ssp-xy','plot_8x8_sr-ppo_ssp-view' ]
-models = ['plot_8x8_ppo_ssp-view']
-env_name = "MiniGrid-Empty-8x8-v0"
+env_name = "MiniGrid-DoorKey-5x5-v0"
 
 n_seeds = 3
-replace_existing = True
+replace_existing = False
 
         
 for i,model_name in enumerate(models):
@@ -30,7 +29,7 @@ for i,model_name in enumerate(models):
         input_type="flat"
     
     for seed in range(n_seeds):
-        _model_name = f"{env_name}_" + model_name + f"_{seed}" 
+        _model_name =  f"{env_name}_" + model_name + f"_{seed}" 
         
         model_dir = utils.get_model_dir(_model_name)
         if os.path.exists(model_dir):
@@ -41,13 +40,16 @@ for i,model_name in enumerate(models):
             else:
                 pass
             
+        if wrapper=='ssp-view':
+            wrapper_args={'ignore': ['WALL', 'FLOOR']}
+        else:
+            wrapper_args={}
         run(algo = algo, input=input_type, wrapper=wrapper, model = _model_name,seed=seed,
-              env=env_name, frames=30000, entropy_coef=0.0005, verbose=False,
-              wrapper_args={'ignore': ['WALL', 'FLOOR']})
+              env=env_name, frames=60000, entropy_coef=0.0005, verbose=False,
+              wrapper_args=wrapper_args)
         
     print("Finsihed "+ model_name )
 
-models = ['plot_8x8_ppo_image','plot_8x8_ppo_xy', 'plot_8x8_ppo_ssp-view']
 fig=plt.figure(figsize=(7.5,2.))
 # linestys = {'ssp-xy': '-', 'image':'--'}
 # cols= {'ppo': utils.reds[0], 'a2c': utils.blues[0],'sr': utils.oranges[0],'sr-ppo': utils.purples[0],}
@@ -58,7 +60,7 @@ for i,model_name in enumerate(models):
 
     for seed in range(0,n_seeds):
         try:
-            model_dir = utils.get_model_dir(model_name +  '_' + str(seed))
+            model_dir = utils.get_model_dir( f"{env_name}_" + model_name +  '_' + str(seed))
             data = pd.read_csv(model_dir + "/log.csv")
             #data['avg_return'] = data.return_mean.copy().rolling(100).mean()
             data = data[pd.to_numeric(data['return_mean'], errors='coerce').notnull()]

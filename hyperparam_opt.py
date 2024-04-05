@@ -18,7 +18,8 @@ from optuna.visualization import plot_timeline
 
                 
 
-def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=1, discount=0.99, env_args={}, initial_params=None):
+def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=1, discount=0.99, 
+          initial_params=None, env_args={}, **kwargs):
     def objective(trial):
         # discount = trial.suggest_categorical("discount", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
         max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 5, 10])
@@ -68,7 +69,7 @@ def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=1, discoun
                                   value_loss_coef=value_loss_coef, actor_hidden_size=actor_hidden_size, 
                                   critic_hidden_size=critic_hidden_size, feature_hidden_size=feature_hidden_size,
                                   clip_eps=clip_eps, batch_size=batch_size, epochs=epochs,
-                                  dissim_coef=dissim_coef,ssp_dim=ssp_dim, ssp_h=ssp_h);
+                                  dissim_coef=dissim_coef,ssp_dim=ssp_dim, ssp_h=ssp_h, **kwargs);
             final_returns[i] = final_return
 
         return np.mean(final_returns)
@@ -112,11 +113,13 @@ if __name__ == "__main__":
                         help="")
     parser.add_argument("--n-trials", type=int, default=100,
                         help="")
+    parser.add_argument("--other-args", type=yaml.load, default={},
+                        help="")
     args = parser.parse_args()
     
     best_params = optim(env=args.env, algo=args.algo, wrapper=args.wrapper,
                         input=args.input,frames=args.frames, 
                         n_seeds=args.n_seeds, n_trials=args.n_trials, domain_dim=args.domain_dim,
-                        env_args=args.env_args)
+                        env_args=args.env_args, **args.other_args)
     print(best_params)
     
