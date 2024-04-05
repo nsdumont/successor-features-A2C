@@ -3,7 +3,9 @@ import yaml
 import numpy as np
 import optuna
 from train import run
-
+import joblib
+import datetime
+from utils import get_model_dir
 from optuna.visualization import plot_contour
 from optuna.visualization import plot_edf
 from optuna.visualization import plot_intermediate_values
@@ -65,7 +67,9 @@ def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=None, disc
 
         return np.mean(final_returns)
     
-                    
+    date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+    default_model_name = f"{args.env}_{args.algo}_{args.wrapper}_{date}"
+    study_dir = get_model_dir("optuna/" + default_model_name)
     
     study = optuna.create_study(direction="maximize")
     if initial_params is not None:
@@ -73,10 +77,12 @@ def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=None, disc
         
     study.optimize(objective, n_trials=n_trials)
     
-    plot_optimization_history(study)
-    plot_param_importances(study)
-    plot_slice(study)
-    return study.best_params
+    joblib.dump(study, study_dir + ".pkl")
+    
+    # plot_optimization_history(study)
+    # plot_param_importances(study)
+    # plot_slice(study)
+    return study
 
 if __name__ == "__main__":
     # Parse arguments

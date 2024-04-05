@@ -79,9 +79,10 @@ for algo in algos:
                 "critic_hidden_size": critic_hidden_size,
                 }
             
-        final_param = optim(env,algo,inwrap,'flat',n_frames, n_seeds,n_trials, 
+        study = optim(env,algo,inwrap,'flat',n_frames, n_seeds,n_trials, 
                             domain_dim=2,initial_params=initial_params )
-        params[algo + '-' + wrap] = final_param
+        params[algo + '-' + wrap] = study.best_params
+        print(study.best_params)
  
         
         
