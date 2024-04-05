@@ -18,7 +18,7 @@ from optuna.visualization import plot_timeline
 
                 
 
-def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=None, discount=0.99, env_args={}, initial_params=None):
+def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=1, discount=0.99, env_args={}, initial_params=None):
     def objective(trial):
         # discount = trial.suggest_categorical("discount", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
         max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 5, 10])
@@ -108,6 +108,9 @@ if __name__ == "__main__":
                         help="")
     args = parser.parse_args()
     
-    best_params = optim(args.env,args.algo,args.wrapper,args.input,args.frames, args.n_seeds, args.n_trials, args.domain_dim, args.env_args)
+    best_params = optim(env=args.env, algo=args.algo, wrapper=args.wrapper,
+                        input=args.input,frames=args.frames, 
+                        n_seeds=args.n_seeds, n_trials=args.n_trials, domain_dim=args.domain_dim,
+                        env_args=args.env_args)
     print(best_params)
     
