@@ -102,7 +102,7 @@ if __name__ == "__main__":
                         help="num seeds")
     parser.add_argument("--frames", type=int, default=10**7,
                         help="number of frames of training (default: 1e7)")
-    parser.add_argument("--domin-dim", type=int, default=1,
+    parser.add_argument("--domain-dim", type=int, default=1,
                         help="")
     parser.add_argument("--n-trials", type=int, default=100,
                         help="")
