@@ -103,7 +103,7 @@ if __name__ == "__main__":
                         help="format of input:  auto | image | flat | ssp | none (default: auto)")
     parser.add_argument("--wrapper", type=str, default="none",
                         help="format of input:  none | ssp-xy | ssp-auto | one-hot | FullyObsWrapper | RGBImgObsWrapper | OneHotPartialObsWrapper | DirectionObsWrapper (default: non)")
-    parser.add_argument("--env-args", type=json.load, default={'render_mode': 'rgb_array'},
+    parser.add_argument("--env-args", type=json.loads, default={'render_mode': 'rgb_array'},
                         help="")
     parser.add_argument("--n-seeds", type=int, default=1,
                         help="num seeds")
@@ -113,7 +113,7 @@ if __name__ == "__main__":
                         help="")
     parser.add_argument("--n-trials", type=int, default=100,
                         help="")
-    parser.add_argument("--other-args", type=json.load, default={},
+    parser.add_argument("--other-args", type=json.loads, default={},
                         help="")
     args = parser.parse_args()
     
