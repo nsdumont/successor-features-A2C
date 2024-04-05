@@ -61,8 +61,6 @@ class MazeOneHotWrapper(gym.ObservationWrapper):
         hot_obs = np.zeros((self.width_size,self.height_size))
         hot_obs[int(obs[0]), int(obs[1])] = 1.0
         
-        return {
-            'mission': obs['mission'],
-            'image': hot_obs.reshape(-1)
-        }
+        return hot_obs.reshape(-1)
+        
 
