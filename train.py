@@ -6,12 +6,6 @@ import utils
 import copy
 import numpy as np
 import yaml
-#import signal # for keyboardintrupt
-
-# Possible envs
-import minigrid
-import miniworld
-import gym_maze
 
 
 from torch.utils.tensorboard import SummaryWriter
@@ -92,6 +86,13 @@ def run(args=None,**kwargs):
     
     # Load environments 
     envs = []
+    if "MiniGrid" in args.env:
+        import minigrid
+    elif "MiniWorl" in args.env:
+        import miniworld
+    elif "maze" in args.env:
+        import gym_maze
+        
     if args.wrapper=='none':
         for i in range(args.procs):
             envs.append(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args))
