@@ -1,5 +1,5 @@
 import argparse
-import yaml
+import json
 import numpy as np
 import optuna
 from train import run
@@ -113,7 +113,7 @@ if __name__ == "__main__":
                         help="")
     parser.add_argument("--n-trials", type=int, default=100,
                         help="")
-    parser.add_argument("--other-args", type=yaml.load, default={},
+    parser.add_argument("--other-args", type=json.load, default={},
                         help="")
     args = parser.parse_args()
     

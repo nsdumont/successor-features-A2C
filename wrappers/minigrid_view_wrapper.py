@@ -120,7 +120,7 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         if self.env.unwrapped.carrying is not None:## check this!!
             obj_name = self.obj_map[self.env.unwrapped.carrying.type]  
             col_name =  self.color_map[self.env.unwrapped.carrying.color]
-            has_sp = (self.vocab['HAS'] * obj_name * col_name).v
+            has_sp = (self.vocab['HAS'] * self.vocab[obj_name] * self.vocab[col_name]).v
             agt_ssp += has_sp
         #M = np.zeros(self.observation_space["image"].shape_out)
         M = agt_ssp

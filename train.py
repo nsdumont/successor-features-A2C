@@ -6,6 +6,7 @@ import utils
 import copy
 import numpy as np
 import yaml
+import json
 
 
 from torch.utils.tensorboard import SummaryWriter
@@ -450,9 +451,9 @@ if __name__ == "__main__":
                         help="format of input:  auto | image | flat | ssp | none (default: auto)")
     parser.add_argument("--wrapper", type=str, default="none",
                         help="format of input:  none | ssp-xy | ssp-auto | one-hot | FullyObsWrapper | RGBImgObsWrapper | OneHotPartialObsWrapper | DirectionObsWrapper (default: non)")
-    parser.add_argument("--env-args", type=yaml.load, default={'render_mode': 'rgb_array'},
+    parser.add_argument("--env-args", type=json.load, default={'render_mode': 'rgb_array'},
                         help="")
-    parser.add_argument("--wrapper-args", type=yaml.load, default={},
+    parser.add_argument("--wrapper-args", type=json.load, default={},
                         help="")
 
     # General algo parameters
