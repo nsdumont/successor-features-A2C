@@ -76,7 +76,7 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         self.vocab.add('I', self.vocab.algebra.identity_element(self.ssp_dim))
         self.vocab.add('NULL', self.vocab.algebra.zero_element(self.ssp_dim))
         self.vocab.add('OPEN',  self.vocab.algebra.identity_element(self.ssp_dim))
-        self.vocab.populate('HAS_KEY')
+        self.vocab.populate('HAS')
         
         colors = [x.upper() for x in list(COLOR_TO_IDX.keys())]
         self.color_map =  dict(zip(list(COLOR_TO_IDX.keys()), colors))
@@ -113,8 +113,11 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         # self.observation_space["image"].encode(np.array([[self.env.unwrapped.agent_pos[0],
         #                                                    self.env.unwrapped.agent_pos[1],
         #                                                    ]]))
-        if self.env.unwrapped.carrying is not None:## change this!!
-            agt_ssp = self.observation_space["image"].ssp_space.bind(agt_ssp, self.vocab['HAS_KEY'].v)
+        if self.env.unwrapped.carrying is not None:## check this!!
+            obj_name = self.obj_map[self.env.unwrapped.carrying.type]  
+            col_name =  self.color_map[self.env.unwrapped.carrying.color]
+            has_sp = (self.vocab['HAS'] * obj_name * col_name).v
+            agt_ssp += has_sp
         #M = np.zeros(self.observation_space["image"].shape_out)
         M = agt_ssp
         for i in range(img.shape[0]):

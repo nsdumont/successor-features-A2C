@@ -140,14 +140,14 @@ class SRPPOAlgo(BaseSRAlgo):
                 
                 self.sr_optimizer.zero_grad()
                 batch_sr_loss.backward(retain_graph=True)
-                update_grad_norm_sr = sum(p.grad.data.norm(2) ** 2 for p in self.model.SR.parameters()) ** 0.5
+                update_grad_norm_sr = sum(p.grad.data.norm(2) ** 2 if p.requires_grad else 0 for p in self.model.SR.parameters()) ** 0.5
                 torch.nn.utils.clip_grad_norm_(self.model.SR.parameters(), self.max_grad_norm)
                 self.sr_optimizer.step()
                 
                 # Update actor (policy loss + entropy)
                 self.actor_optimizer.zero_grad()
                 batch_actor_loss.backward(retain_graph=True)
-                update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 for p in self.model.actor.parameters()) ** 0.5
+                update_grad_norm_actor = sum(p.grad.data.norm(2) ** 2 if p.requires_grad else 0 for p in self.model.actor.parameters()) ** 0.5
                 torch.nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.max_grad_norm)
                 self.actor_optimizer.step()
 
@@ -156,7 +156,7 @@ class SRPPOAlgo(BaseSRAlgo):
                 if self.feature_learn != "none":
                     self.feature_optimizer.zero_grad()
                     batch_feature_loss.backward(retain_graph=True)
-                    update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 for p in self.model.feature_net.parameters()) ** 0.5
+                    update_grad_norm_features = sum(p.grad.data.norm(2) ** 2 if p.requires_grad else 0 for p in self.model.feature_net.parameters()) ** 0.5
                     torch.nn.utils.clip_grad_norm_(self.model.feature_net.parameters(), self.max_grad_norm)
                     torch.nn.utils.clip_grad_norm_(self.model.feature_net.parameters(), self.max_grad_norm)
                     self.feature_optimizer.step()
@@ -180,7 +180,7 @@ class SRPPOAlgo(BaseSRAlgo):
 
                 self.model.zero_grad()
                 batch_reward_loss.backward(retain_graph=False)
-                update_grad_norm_reward = sum(p.grad.data.norm(2) ** 2 for p in self.model.reward.parameters()) ** 0.5
+                update_grad_norm_reward = sum(p.grad.data.norm(2) ** 2 if p.requires_grad else 0 for p in self.model.reward.parameters()) ** 0.5
                 torch.nn.utils.clip_grad_norm_(self.model.reward.parameters(), self.max_grad_norm)
                 self.reward_optimizer.step()
                 

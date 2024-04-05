@@ -120,6 +120,36 @@ class SSPBabyAIViewWrapper(gym.ObservationWrapper):
             for w in words:
                 O_w = O_w * self.vocab[self.total_map[w]]
             O += O_w.v
+        if re.match("get a .*", mission): #same as to go to
+            words = mission.partition("get a ")[2].split(" ")
+            O_w = self.vocab['GO_TO']
+            for w in words:
+                O_w = O_w * self.vocab[self.total_map[w]]
+            O += O_w.v
+        if re.match("go get a .*", mission):#same as to go to
+            words = mission.partition("go get a ")[2].split(" ")
+            O_w = self.vocab['GO_TO']
+            for w in words:
+                O_w = O_w * self.vocab[self.total_map[w]]
+            O += O_w.v
+        if re.match("fetch a .*", mission):#same as to go to
+            words = mission.partition("fetch a ")[2].split(" ")
+            O_w = self.vocab['GO_TO']
+            for w in words:
+                O_w = O_w * self.vocab[self.total_map[w]]
+            O += O_w.v
+        if re.match("go fetch a .*", mission):#same as to go to
+            words = mission.partition("go fetch a ")[2].split(" ")
+            O_w = self.vocab['GO_TO']
+            for w in words:
+                O_w = O_w * self.vocab[self.total_map[w]]
+            O += O_w.v
+        if re.match("you must fetch a .*", mission):#same as to go to
+            words = mission.partition("you must fetch a ")[2].split(" ")
+            O_w = self.vocab['GO_TO']
+            for w in words:
+                O_w = O_w * self.vocab[self.total_map[w]]
+            O += O_w.v
         if re.match(".*open the .*", mission):
             words = mission.partition("open the ")[2].split(" ")
             O_w = self.vocab['OPEN']

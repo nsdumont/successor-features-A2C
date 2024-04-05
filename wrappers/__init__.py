@@ -1,7 +1,7 @@
 from .ssp_wrapper import SSPEnvWrapper
 from .minigrid_ssp_xy_wrapper import SSPMiniGridXYWrapper
 from .minigrid_xy_wrapper import MiniGridXYWrapper
-from .minigrid_onehot_wrapper import MiniGridOneHotWrapper
+from .minigrid_onehot_wrapper import MiniGridOneHotWrapper, MazeOneHotWrapper
 from .minigrid_view_wrapper import SSPMiniGridViewWrapper
 
 from .babyai_view_wrapper import SSPBabyAIViewWrapper

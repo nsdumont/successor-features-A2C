@@ -16,7 +16,7 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
     def __init__(self, obs_space, action_space, use_memory=False,
                  use_text=False,normalize=False,input_type="image",obs_space_sampler=None,
                  critic_hidden_size=64, actor_hidden_size=64, 
-                 feature_hidden_size=256, feature_size=64):
+                 feature_hidden_size=256, feature_size=64, **kwargs):
         super().__init__()
         
         
@@ -29,7 +29,7 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
 
         if input_type in feature_rep_options.keys():
             self.feature_net = feature_rep_options[input_type](obs_space,use_memory=use_memory,use_text=use_text, normalize=normalize,
-                                                              hidden_size=feature_hidden_size,input_embedding_size=feature_size)
+                                                              hidden_size=feature_hidden_size,input_embedding_size=feature_size, **kwargs)
         else:
             raise ValueError("Incorrect input type option: {} (should be {})".format(input_type, ', '.join(feature_rep_options.keys())))
             

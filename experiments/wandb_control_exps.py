@@ -100,6 +100,22 @@ for e in ['CartPole', 'MountainCar', 'MountainCarContinuous', 'LunarLander', 'Lu
     s,p = mannwhitneyu(resdict[e+'-ssp'], resdict[e+'-default'], alternative='greater')
     improvprobs[e] = s/ (len(resdict[e+'-ssp']) * len(resdict[e+'-default']))
     pvals[e] = p
+    
+cohen_ds = {}
+cohen_ds_size = {}
+for e in [ 'MountainCar', 'MountainCarContinuous', 'LunarLander', 'LunarLanderContinuous','Pendulum','Acrobot']:
+    c0 = resdict[e+'-ssp']
+    c1 = resdict[e+'-default']
+    cohen_ds[e]= (np.mean(c0) - np.mean(c1)) / (np.sqrt((np.std(c0, ddof=1)**2 + np.std(c1, ddof=1)**2) / 2.0))
+    if cohen_ds[e] < 0.2:
+        cohen_ds_size[e] = 'null'
+    elif cohen_ds[e] < 0.5:
+        cohen_ds_size[e] = 'small'
+    elif cohen_ds[e] < 0.8:
+        cohen_ds_size[e] = 'medium'
+    else:
+        cohen_ds_size[e] = 'large'
+    
 # runs = api.runs(entity + "/" + project) 
 
 # summary_list, config_list, name_list = [], [], []

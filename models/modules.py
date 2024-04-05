@@ -64,7 +64,7 @@ def mlp(*layers: tp.Sequence[tp.Union[int, str]]) -> nn.Sequential:
 
 ## Add-ons that use memory (LSTMs) and text input
 class FeatureProcesser(nn.Module):
-    def __init__(self, obs_space, input_embedding_size, use_memory, use_text, normalize):
+    def __init__(self, obs_space, input_embedding_size, use_memory, use_text, normalize, **kwargs):
         super().__init__()
         self.use_text = use_text
         self.use_memory = use_memory
@@ -178,13 +178,18 @@ class FlatProcesser(nn.Module):
 ## Construct SSP features from input with trainable ls  
 class SSPProcesser(nn.Module):
     def __init__(self, obs_space,use_memory,  use_text, normalize, 
-                 input_embedding_size=151, hidden_size=0, activation_fun='relu', basis_type='hex', **kwargs):
+                 input_embedding_size=151, hidden_size=0, activation_fun='relu', basis_type='learn', **kwargs):
         super().__init__()
         if type(obs_space["image"]) is int:
             self.input_dim = obs_space["image"]
         else:
             self.input_dim = obs_space["image"][0]
-            
+        if 'ssp_dim' in kwargs:
+            input_embedding_size = kwargs['ssp_dim']
+        if 'ssp_h' in kwargs:
+            initial_ls = kwargs['ssp_h']
+        else:
+            initial_ls = 1.0
         if basis_type=='hex':
             ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size)
             self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
@@ -195,8 +200,8 @@ class SSPProcesser(nn.Module):
             self.length_scale = torch.nn.Parameter(torch.ones(self.input_dim), requires_grad=True)
         elif basis_type=='learn':
             ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size) # initial
-            self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=True)
-            self.length_scale = torch.nn.Parameter(torch.ones(self.input_dim), requires_grad=False)
+            self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
+            self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
             # raise Exception("Learning the full phase matrix of the SSP encosing is not yet implemented") 
         
         

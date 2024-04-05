@@ -25,7 +25,7 @@ from algos.ppo import PPOAlgo
 from models.sr_model import SRModel
 
 #python train.py --algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 -a2c --lr_sr 0.01
-#maze-sample-5x5-v0
+#python train.py --algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper ssp-xy --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
@@ -90,7 +90,7 @@ def run(args=None,**kwargs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     txt_logger.info(f"Device: {device}\n")
     
-    # Load environments
+    # Load environments 
     envs = []
     if args.wrapper=='none':
         for i in range(args.procs):
@@ -101,7 +101,7 @@ def run(args=None,**kwargs):
             envs.append( SSPEnvWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
                                 auto_convert_obs_space = True,auto_convert_action_space=False, shape_out = args.ssp_dim, length_scale=args.ssp_h,
                                 decoder_method = 'from-set'))
-    elif (args.env[:8]=='MiniGrid') or (args.env[:6]=='BabyAI'):
+    elif ('MiniGrid' in args.env) or ('BabyAI' in args.env):
         if (args.wrapper =='xy'):
             from wrappers import MiniGridXYWrapper
             for i in range(args.procs):
@@ -132,7 +132,7 @@ def run(args=None,**kwargs):
             exec(f"from minigrid.wrappers import {args.wrapper} as wrapper")
             for i in range(args.procs):
                 envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
-    elif (args.env[:9]=='MiniWorld'): 
+    elif 'MiniWorld' in args.env: 
         if (args.wrapper =='ssp-xy'):
             from wrappers import SSPMiniWorldXYWrapper
             for i in range(args.procs):
@@ -150,7 +150,11 @@ def run(args=None,**kwargs):
             exec(f"from miniworld.wrappers import {args.wrapper} as wrapper")
             for i in range(args.procs):
                 envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
-    
+    elif ('maze' in args.env):
+        if args.wrapper=='one-hot':
+            from wrappers import MazeOneHotWrapper
+            for i in range(args.procs):
+                envs.append(MazeOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
     
     txt_logger.info("Environments loaded\n")
     
@@ -158,7 +162,7 @@ def run(args=None,**kwargs):
     try:
         status = utils.get_status(model_dir)
     except OSError:
-        status = {"num_frames": 0, "update": 0}
+        status = {"args": args, "num_frames": 0, "update": 0}
     txt_logger.info("Training status loaded\n")
     
     # Load observations preprocessor
@@ -183,14 +187,16 @@ def run(args=None,**kwargs):
                         critic_hidden_size=args.critic_hidden_size,
                         actor_hidden_size=args.actor_hidden_size, 
                         feature_hidden_size=args.feature_hidden_size,
-                        feature_size=args.feature_size, feature_learn_hidden_size=args.feature_learn_hidden_size)
+                        feature_size=args.feature_size, feature_learn_hidden_size=args.feature_learn_hidden_size,
+                        ssp_dim=args.ssp_dim, ssp_h=args.ssp_h)
     else:
         model = ACModel(obs_space, envs[0].action_space, args.mem, args.text,args.normalize_embeddings,
                         args.input, obs_space_sampler=envs[0].observation_space,
                         critic_hidden_size=args.critic_hidden_size,
                         actor_hidden_size=args.actor_hidden_size, 
                         feature_hidden_size=args.feature_hidden_size,
-                        feature_size=args.feature_size)
+                        feature_size=args.feature_size,
+                        ssp_dim=args.ssp_dim, ssp_h=args.ssp_h)
     if "model_state" in status:
         model.load_state_dict(status["model_state"])
 
@@ -398,7 +404,10 @@ def run(args=None,**kwargs):
         txt_logger.info("Average test return: " + str(np.mean(test_episode_returns)) 
                         + " (" + str(np.min(test_episode_returns)) + ", " + str(np.max(test_episode_returns)) + ")")
     else:
-        test_episode_returns = data[4]
+        try:# fix for case where modle is loaed
+            test_episode_returns = data[4]
+        except:
+            test_episode_returns = None
     
     if args.wandb:
         wandbrun.finish()

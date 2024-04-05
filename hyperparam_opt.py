@@ -16,9 +16,9 @@ from optuna.visualization import plot_timeline
 
                 
 
-def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, env_args={}, initial_params=None):
+def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, domain_dim=None, discount=0.99, env_args={}, initial_params=None):
     def objective(trial):
-        discount = trial.suggest_categorical("discount", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
+        # discount = trial.suggest_categorical("discount", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
         max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 5, 10])
         gae_lambda = trial.suggest_categorical("gae_lambda", [0.8, 0.9, 0.92, 0.95, 0.98, 0.99, 1.0])
         lr = trial.suggest_float("lr", 1e-5, 1, log=True)
@@ -41,8 +41,8 @@ def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, env_args={}, initial_
             epochs=4
         
         if 'ssp' in wrapper:
-            dissim_coef = trial.suggest_float("dissim_coef", 0.00000001, 0.1, log=True)
-            ssp_dim = trial.suggest_categorical("ssp_dim", [2*(args.domain_dim+1)*(i**2) + 1 for i in range(2,8)])
+            dissim_coef = 0.0#trial.suggest_float("dissim_coef", 0.0, 0.1)
+            ssp_dim = trial.suggest_categorical("ssp_dim", [2*(domain_dim+1)*(i**2) + 1 for i in range(2,8)])
             ssp_h = trial.suggest_float("ssp_h", 0.0001, 100, log=True)
         else:
             dissim_coef=0.0
@@ -67,7 +67,7 @@ def optim(env,algo,wrapper,input,frames, n_seeds,n_trials, env_args={}, initial_
     
                     
     
-    study = optuna.create_study()
+    study = optuna.create_study(direction="maximize")
     if initial_params is not None:
         study.enqueue_trial(initial_params)
         
@@ -102,6 +102,6 @@ if __name__ == "__main__":
                         help="")
     args = parser.parse_args()
     
-    best_params = optim(args.env,args.algo,args.wrapper,args.input,args.frames, args.n_seeds, args.n_trials, args.env_args)
+    best_params = optim(args.env,args.algo,args.wrapper,args.input,args.frames, args.n_seeds, args.n_trials, args.domain_dim, args.env_args)
     print(best_params)
     
