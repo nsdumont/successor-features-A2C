@@ -118,7 +118,7 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
         else:
             feature_loss = None
         
-        embedding, memory, embed_txt = self.target_feature_net(obs, memory=memory)
+        embedding, memory, embed_txt = self.target_feature_net(obs, memory)
         dist = self.actor(embedding)
         successor = self.SR(embedding) + embedding # skip connection
         reward = self.reward(embedding).squeeze() 

@@ -22,8 +22,8 @@ class SSPMiniWorldXYWrapper(gym.ObservationWrapper):
             
         # Set-up observation space
         self.observation_space = SSPBox(
-                        low = np.array([0, env.unwrapped.min_x,env.unwrapped.min_z]),
-                        high = np.array([2*np.pi,env.unwrapped.max_x, env.unwrapped.max_z]), #order??
+                        low = np.array([env.unwrapped.min_x,env.unwrapped.min_z,0]),
+                        high = np.array([env.unwrapped.max_x, env.unwrapped.max_z,2*np.pi]), #order??
                         shape_in = 3,
                         shape_out = shape_out,
                         ssp_space=ssp_space,
@@ -32,9 +32,9 @@ class SSPMiniWorldXYWrapper(gym.ObservationWrapper):
         
 
     def observation(self, obs):
-        ssp_obs = self.observation_space.encode(np.array([[self.env.unwrapped.agent.dir,
-                                                           self.env.unwrapped.agent.pos[0],
+        ssp_obs = self.observation_space.encode(np.array([[self.env.unwrapped.agent.pos[0],
                                                            self.env.unwrapped.agent.pos[2],
+                                                           self.env.unwrapped.agent.dir,
                                                            ]]))
         return ssp_obs.reshape(-1)
     

@@ -188,16 +188,18 @@ class SSPProcesser(nn.Module):
             input_embedding_size = kwargs['ssp_dim']
         if 'ssp_h' in kwargs:
             initial_ls = kwargs['ssp_h']
+            if type(initial_ls) is np.ndarray:
+                initial_ls=torch.Tensor(initial_ls.flatten())
         else:
             initial_ls = 1.0
         if basis_type=='hex':
             ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size)
             self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
-            self.length_scale = torch.nn.Parameter(torch.ones(self.input_dim), requires_grad=True)
+            self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
         elif basis_type=='rand':
             ssp_space = RandomSSPSpace(self.input_dim, input_embedding_size)
             self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
-            self.length_scale = torch.nn.Parameter(torch.ones(self.input_dim), requires_grad=True)
+            self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
         elif basis_type=='learn':
             ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size) # initial
             self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=True)

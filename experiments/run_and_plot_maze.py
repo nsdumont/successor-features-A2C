@@ -12,15 +12,18 @@ envs = np.array([ 'maze-sample-5x5-v0', 'maze-sample-6x6-v0', 'maze-sample-7x7-v
         'maze-sample-8x8-v0', 'maze-sample-9x9-v0', 'maze-sample-10x10-v0',
         'maze-sample-11x11-v0', 'maze-sample-12x12-v0','maze-sample-15x15-v0',
         'maze-sample-20x20-v0' ])
-envs = np.array([ 'maze-sample-7x7-v0'])
 # optim_num_steps= dict(zip(envs,[15, 19, 31, 33, 19, 47, 61, 39, 79, 77]))
 optim_rewards=dict(zip(envs,[0.9874, 0.9838,0.973, 0.9712, 0.9838, 0.9586, 0.9553719008264463, 0.97625, 0.9688, 0.9829]))
 algos = np.array(['ppo'])
 wrappers = np.array(['xy', 'one-hot','ssp', 'ssp-learn'])#
+
+envs = np.array([ 'maze-sample-5x5-v0'])
+wrappers = np.array(['ssp-learn'])#
+
 discount = 0.99
 n_seeds = 3
 dissim_coef=0.0
-replace_existing = False
+replace_existing = True
 for i, env in enumerate(envs):
     maze_size = int(env.split('-')[2].split('x')[0])
     if maze_size < 9:
@@ -30,7 +33,7 @@ for i, env in enumerate(envs):
     elif maze_size < 20:
         n_frames = 100000
     else:
-        n_frames = 200000
+        n_frames = 100000
     
     for algo in algos:
         for wrap in wrappers:
@@ -45,9 +48,13 @@ for i, env in enumerate(envs):
                         os.rmdir(model_dir)
                     else:
                         pass
-                    
-                if wrap=='xy':
-                    inwrap='none'
+                
+                if (wrap=='xy') or (wrap=='one-hot'):
+                    if wrap=='one-hot':
+                        inwrap='one-hot'
+                        #Trial 83 finished with value: 0.982803565405664 and parameters: {'max_grad_norm': 5, 'gae_lambda': 0.99, 'lr': 0.0011172563477130418, 'entropy_coef': 0.0034417738877241867, 'entropy_decay': 0.07359940720031101, 'procs': 1, 'value_loss_coef': 0.5089918537606997, 'actor_hidden_size': 32, 'critic_hidden_size': 256, 'feature_hidden_size': 32, 'clip_eps': 0.13178468542859872, 'batch_size': 64, 'epochs': 20}. Best is trial 83 with value: 0.982803565405664.
+                    else:
+                        inwrap='none'
                     input_type='flat'
                     dissim_coef= 0
                     # lr=0.0001
@@ -89,15 +96,62 @@ for i, env in enumerate(envs):
                     
                     ssp_dim=1
                     ssp_h=1
+                if wrap=='ssp-learn':
+                    inwrap = 'none'
+                    input_type = 'ssp'
                     
-                if 'ssp' in wrap:
+                    discount= 0.99
+                    max_grad_norm=0.6
+                    gae_lambda=0.92
+                    lr =0.0013261687855477475
+                    entropy_coef=4.181779221852914e-08
+                    entropy_decay=0.0011045551930278221
+                    procs=4
+                    value_loss_coef= 0.1723433395418726
+                    actor_hidden_size= 64
+                    critic_hidden_size= 128
+                    feature_hidden_size= 64
+                    clip_eps=0.2035398350991972
+                    batch_size=256
+                    epochs= 5
+                    ssp_dim= 55
+                    ssp_h=1.0
+                    
+                    # max_grad_norm= 2
+                    # gae_lambda= 0.95
+                    # lr=2.2183220259410734e-05
+                    # entropy_coef= 1.236685364126784e-05
+                    # entropy_decay= 0.0015574029070002872
+                    # procs= 4
+                    # value_loss_coef= 0.1481032251855734
+                    # actor_hidden_size= 256
+                    # critic_hidden_size= 128
+                    # feature_hidden_size= 128
+                    # clip_eps= 0.014141657615793196
+                    # batch_size= 16
+                    # epochs= 5
+                    # ssp_dim= 145
+                    # ssp_h = 1.0
+                    
+                    # max_grad_norm= 2
+                    # gae_lambda= 1.0
+                    # lr=0.001939282869
+                    # entropy_coef= 0.0002321296
+                    # entropy_decay=0.00043517
+                    # procs= 4
+                    # value_loss_coef= 0.3766876
+                    # actor_hidden_size= 32
+                    # critic_hidden_size= 64
+                    # feature_hidden_size= 32
+                    # clip_eps= 0.51553
+                    # batch_size= 512
+                    # epochs= 20
+                    # ssp_dim= 197
+                    # ssp_h = 1.0
+                elif 'ssp' in wrap:
                     # dissim_coef =0.0#float(wrap.split('_')[1])
-                    if wrap=='ssp-learn':
-                        inwrap = 'none'
-                        input_type = 'ssp'
-                    else:
-                        inwrap='ssp-auto'
-                        input_type = 'flat'
+                    inwrap='ssp-auto'
+                    input_type = 'flat'
                     
                     # Found by trial and error
                     # discount=0.99
@@ -170,12 +224,13 @@ for i, env in enumerate(envs):
                       dissim_coef=dissim_coef,ssp_dim=ssp_dim, ssp_h=ssp_h);
             #optim_eps=1e-9, 
    
-            
 #
 # envs = np.array(['maze-sample-5x5-v0', 'maze-sample-6x6-v0', 'maze-sample-7x7-v0',
 #         'maze-sample-8x8-v0', 'maze-sample-9x9-v0', 'maze-sample-10x10-v0',
 #          'maze-sample-12x12-v0','maze-sample-15x15-v0',
 #         'maze-sample-20x20-v0' ])
+wrappers = np.array(['one-hot','ssp-learn'])#
+
 all_models = [[e + '_' + algos[0] + '_' + w for w in wrappers ] for e in envs]
 
 if len(envs)==1:

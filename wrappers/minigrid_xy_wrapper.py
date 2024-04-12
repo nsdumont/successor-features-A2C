@@ -14,16 +14,17 @@ class MiniGridXYWrapper(gym.ObservationWrapper):
         # Set-up observation space
         self.observation_space["image"] = Box(
                         low = np.array([0,0,0]),
-                        high = np.array([3,env.unwrapped.width,env.unwrapped.height]),
+                        high = np.array([env.unwrapped.width,env.unwrapped.height,3]),
                         dtype=np.float32,
                         **kwargs)
         
         
 
     def observation(self, obs):
-        xy_obs = np.array([self.env.unwrapped.agent_dir,
+        xy_obs = np.array([
                         self.env.unwrapped.agent_pos[0],
                         self.env.unwrapped.agent_pos[1],
+                        self.env.unwrapped.agent_dir
                         ])
         return {
             'mission': obs['mission'],

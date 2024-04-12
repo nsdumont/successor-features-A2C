@@ -23,7 +23,7 @@ class SSPMiniGridXYWrapper(gym.ObservationWrapper):
         # Set-up observation space
         self.observation_space["image"] = SSPBox(
                         low = np.array([0,0,0]),
-                        high = np.array([3,env.unwrapped.width,env.unwrapped.height]),
+                        high = np.array([env.unwrapped.width,env.unwrapped.height,3]),
                         shape_in = 3,
                         shape_out = shape_out,
                         ssp_space=ssp_space,
@@ -32,9 +32,10 @@ class SSPMiniGridXYWrapper(gym.ObservationWrapper):
         
 
     def observation(self, obs):
-        ssp_obs = self.observation_space["image"].encode(np.array([[self.env.unwrapped.agent_dir,
+        ssp_obs = self.observation_space["image"].encode(np.array([[
                                                            self.env.unwrapped.agent_pos[0],
                                                            self.env.unwrapped.agent_pos[1],
+                                                           self.env.unwrapped.agent_dir
                                                            ]]))
         return {
             'mission': obs['mission'],

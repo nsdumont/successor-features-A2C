@@ -156,9 +156,9 @@ class TransitionLatentModel(FeatureLearner):
         
 
     def forward(self, obs: torch.Tensor, action: torch.Tensor, next_obs: torch.Tensor, memory=None, next_memory=None):
-        phi,_,_ = self.feature_net(obs)
+        phi,_,_ = self.feature_net(obs,memory)
         with torch.no_grad():
-            next_phi = self.target_feature_net(next_obs)
+            next_phi,_,_ = self.target_feature_net(next_obs,memory)
         predicted_next_obs = self.forward_dynamic_net(torch.cat([phi, action], dim=-1))
         forward_error = (predicted_next_obs - next_phi.detach()).pow(2).mean()
 
@@ -175,7 +175,7 @@ class AutoEncoder(FeatureLearner):
     def forward(self, obs: torch.Tensor, action: torch.Tensor, next_obs: torch.Tensor, memory=None, next_memory=None):
         del next_obs
         del action
-        phi,_,_ = self.feature_net(obs)
+        phi,_,_ = self.feature_net(obs,memory)
         predicted_obs = self.decoder(phi)
         reconstruction_error = (predicted_obs - obs).pow(2).mean()
         return reconstruction_error

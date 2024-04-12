@@ -46,7 +46,7 @@ class SSPMiniGridViewWrapper(gym.ObservationWrapper):
         env: gym.Env,
         ssp_space = None,
         shape_out = None,
-        ignore = ['WALL', 'FLOOR'],
+        ignore = ['UNSEEN','WALL', 'FLOOR'],
         notice = None,
         **kwargs
     ):

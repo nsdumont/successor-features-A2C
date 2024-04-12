@@ -28,8 +28,8 @@ from models.sr_model import SRModel
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --input ssp --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper ssp-xy --input none --plot True --feature-learn none', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --input ssp --plot True --feature-learn combined', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper none --input image --plot True --feature-learn curiosity', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --input ssp --plot True --feature-learn icm', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper none --input image --plot True --feature-learn latent', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 50000 --input ssp-xy --feature-learn none --lr_sr 0.01 --ssp-h 1', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniWorld-TMazeLeft-v0 --frames 50000 --input ssp-xy --feature-learn none --lr_sr 0.01 --ssp-h 1 --procs 1', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
@@ -39,7 +39,7 @@ from models.sr_model import SRModel
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env maze-random-7x7 --frames 30000 --wrapper ssp-auto --plot True --n_test_episodes 0 --ssp-h 1 --lr 0.001 --entropy-decay 1e-5 --gae-lambda 1 --optim-eps 1e-9 --entropy-coef 0.0002 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 
 
-def run(args=None,**kwargs): 
+def run(args=None,custom_log_fun=None,**kwargs): 
     if args is None:
         if "config" in kwargs:
             configfilename = kwargs['config']
@@ -354,8 +354,10 @@ def run(args=None,**kwargs):
     
             for field, value in zip(header, data):
                 tb_writer.add_scalar(field, value, num_frames)
+                
+            if custom_log_fun:
+                custom_log_fun(data);
         
-
     
         # Save status
     
@@ -414,7 +416,7 @@ def run(args=None,**kwargs):
         txt_logger.info("Average test return: " + str(np.mean(test_episode_returns)) 
                         + " (" + str(np.min(test_episode_returns)) + ", " + str(np.max(test_episode_returns)) + ")")
     else:
-        try:# fix for case where modle is loaed
+        try:# fix for case where model is loaded
             test_episode_returns = data[4]
         except:
             test_episode_returns = None
