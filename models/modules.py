@@ -127,17 +127,34 @@ class ImageProcesser(nn.Module):
         m = obs_space["image"][1]
         
         self.input_embedding_size = input_embedding_size
-        self.conv_output_size = ((n-1)//2-2)*((m-1)//2-2)*64
-        self.cnn = nn.Sequential(
-            nn.Conv2d(3, 16, (2, 2)),
-            nn.ReLU(),
-            nn.MaxPool2d((2, 2)),
-            nn.Conv2d(16, 32, (2, 2)),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, (2, 2)),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
+        if (n==7) & (m==7): # minigrid
+            self.conv_output_size = ((n-1)//2-2)*((m-1)//2-2)*64
+            self.cnn = nn.Sequential(
+                nn.Conv2d(3, 16, (2, 2)),
+                nn.ReLU(),
+                nn.MaxPool2d((2, 2)),
+                nn.Conv2d(16, 32, (2, 2)),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, (2, 2)),
+                nn.ReLU(),
+                nn.Flatten(),
+            )
+        elif (n==60) & (m==80): # miniworld
+            self.conv_output_size = 32 * 7 * 5
+            self.cnn = nn.Sequential(
+                nn.Conv2d(3, 32, kernel_size=5, stride=2),
+                nn.BatchNorm2d(32),
+                nn.ReLU(),
+                nn.Conv2d(32, 32, kernel_size=5, stride=2),
+                nn.BatchNorm2d(32),
+                nn.ReLU(),
+                nn.Conv2d(32, 32, kernel_size=4, stride=2),
+                nn.BatchNorm2d(32),
+                nn.ReLU(),
+                nn.Flatten(),
+            )
+        else:
+            raise ValueError(f"CNN not set-up for image input of size {n}x{m}. Please add a new option in ImageProcesser")
 
         self.linear = nn.Sequential(nn.Linear(self.conv_output_size, self.input_embedding_size), nn.ReLU())
         self.other = FeatureProcesser(obs_space, self.input_embedding_size,
@@ -263,12 +280,18 @@ class ContinuousActor(nn.Module):
         self.embedding_size = embedding_size
         self.n_actions = n_actions
         self.log_std_bounds=log_std_bounds
-        self.actor_layers = mlp(embedding_size, hidden_size, "ntanh",
-                                hidden_size, "relu", 2 * n_actions)
+        self.actor_layers = mlp(embedding_size, hidden_size, "relu",
+                                hidden_size, "relu")
+        self.mu = nn.Linear(hidden_size, n_actions)
+        self.log_sigma = nn.Linear(hidden_size, n_actions)
         
         
     def forward(self, embedding):
-        mu, log_std = self.actor_layers(embedding).chunk(2, dim=-1)
+        x= self.actor_layers(embedding)
+        mu= self.mu(x)
+        assert not torch.isnan(x).any()
+        assert not torch.isnan(mu).any()
+        log_std = self.log_sigma(x)
         log_std = torch.tanh(log_std)
         log_std_min, log_std_max = self.log_std_bounds
         log_std = log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std + 1)

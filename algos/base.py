@@ -123,6 +123,10 @@ class BaseAlgo(ABC):
         self.log_reshaped_return = [0] * self.num_procs
         self.log_num_frames = [0] * self.num_procs
         
+        if self.continuous_action:
+            self.max_action = torch.tensor(self.env.envs[0].action_space.high,device=self.device)
+            self.min_action = torch.tensor(self.env.envs[0].action_space.low,device=self.device)
+      
         
         # self.use_blr=use_blr
         # if use_blr:
@@ -152,8 +156,8 @@ class BaseAlgo(ABC):
         for i in range(self.num_frames_per_proc):
             # Do one agent-environment interaction
             
-            if self.continuous_action:
-                self.obs = [o for o in self.model.scaler.transform(self.obs)]
+            # if self.continuous_action:
+            #     self.obs = [o for o in self.model.scaler.transform(self.obs)]
 
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
             with torch.no_grad():
@@ -164,8 +168,9 @@ class BaseAlgo(ABC):
             
             if self.continuous_action:
                 action = dist.sample().detach()
-                action = torch.clamp(action, self.env.envs[0].min_action, self.env.envs[0].max_action)
-                torch.nan_to_num(action, nan=torch.Tensor(self.env.envs[0].action_space.sample()), posinf=self.env.envs[0].max_action, neginf=self.env.envs[0].min_action)
+                action = torch.clamp(action, self.min_action, self.max_action )
+                # assert not torch.isnan(action).any()
+                action=torch.nan_to_num(action, nan=0, posinf=torch.max(self.max_action), neginf=torch.min(self.min_action))
             else:
                 action = dist.sample().detach()
 
@@ -195,7 +200,7 @@ class BaseAlgo(ABC):
                 ], device=self.device)
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
-            self.log_probs[i] = dist.log_prob(action).squeeze()
+            self.log_probs[i] = dist.log_prob(action).sum(dim=-1).squeeze()
 
             # Update log values
 
@@ -216,14 +221,14 @@ class BaseAlgo(ABC):
 
         # Add advantage and return to experiences
         
-        if self.continuous_action:
-            # asuming flat observations for continuous action case:
-                # this is true for the Mountain Cart example but may not be in general
-                # Ideally the continuous action code should be modifed to handle flat or image input
-                # And the use of a scaler should be an option to train.py
-                # And either use checks here to do the following
-                # or create a wrapper that does the scaling and set it up in train.py
-            self.obs = [o for o in self.model.scaler.transform(self.obs)]
+        # if self.continuous_action:
+        #     # asuming flat observations for continuous action case:
+        #         # this is true for the Mountain Cart example but may not be in general
+        #         # Ideally the continuous action code should be modifed to handle flat or image input
+        #         # And the use of a scaler should be an option to train.py
+        #         # And either use checks here to do the following
+        #         # or create a wrapper that does the scaling and set it up in train.py
+        #     self.obs = [o for o in self.model.scaler.transform(self.obs)]
 
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
@@ -272,7 +277,10 @@ class BaseAlgo(ABC):
             # T x P -> P x T -> (P * T) x 1
             exps.mask = self.masks.transpose(0, 1).reshape(-1).unsqueeze(1)
         # for all tensors below, T x P -> P x T -> P * T
-        exps.action = self.actions.transpose(0, 1).reshape(-1)
+        if self.continuous_action:
+            exps.action = self.actions.transpose(0, 1).view(-1, self.actions.shape[2])
+        else:
+            exps.action = self.actions.transpose(0, 1).reshape(-1)
         exps.value = self.values.transpose(0, 1).reshape(-1)
         exps.reward = self.rewards.transpose(0, 1).reshape(-1)
         exps.advantage = self.advantages.transpose(0, 1).reshape(-1)

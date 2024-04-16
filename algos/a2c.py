@@ -48,13 +48,23 @@ class A2CAlgo(BaseAlgo):
             else:
                 dist, value, _ = self.model(sb.obs, None)
 
-            entropy = dist.entropy().mean()
-
-            policy_loss = -(dist.log_prob(sb.action) * sb.advantage).mean() 
-
+            if self.continuous_action:
+                log_prob = dist.log_prob(sb.action)
+                log_prob = torch.nan_to_num(log_prob, nan=0, posinf=10, neginf=-10)
+                log_prob= log_prob.sum(dim=-1)
+                entropy = -log_prob.mean()
+                policy_loss = -(log_prob * sb.advantage).mean() 
+                assert not torch.isnan(entropy).any()
+                assert not torch.isnan(policy_loss).any()
+            else:
+                entropy = dist.entropy().mean()
+                policy_loss = -(dist.log_prob(sb.action) * sb.advantage).mean() 
+                
+            
             value_loss = (value - sb.returnn).pow(2).mean()
 
             loss = policy_loss - self.entropy_coef * entropy + self.value_loss_coef * value_loss
+            assert not torch.isnan(loss).any()
             # if policy_loss < -1e5:
             #     print(policy_loss)
             # Update batch values

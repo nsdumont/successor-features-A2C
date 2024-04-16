@@ -17,8 +17,8 @@ optim_rewards=dict(zip(envs,[0.9874, 0.9838,0.973, 0.9712, 0.9838, 0.9586, 0.955
 algos = np.array(['ppo'])
 wrappers = np.array(['xy', 'one-hot','ssp', 'ssp-learn'])#
 
-envs = np.array([ 'maze-sample-5x5-v0'])
-wrappers = np.array(['ssp-learn'])#
+# envs = np.array([ 'maze-sample-5x5-v0'])
+# wrappers = np.array(['ssp-learn'])#
 
 discount = 0.99
 n_seeds = 3
@@ -52,47 +52,60 @@ for i, env in enumerate(envs):
                 if (wrap=='xy') or (wrap=='one-hot'):
                     if wrap=='one-hot':
                         inwrap='one-hot'
-                        #Trial 83 finished with value: 0.982803565405664 and parameters: {'max_grad_norm': 5, 'gae_lambda': 0.99, 'lr': 0.0011172563477130418, 'entropy_coef': 0.0034417738877241867, 'entropy_decay': 0.07359940720031101, 'procs': 1, 'value_loss_coef': 0.5089918537606997, 'actor_hidden_size': 32, 'critic_hidden_size': 256, 'feature_hidden_size': 32, 'clip_eps': 0.13178468542859872, 'batch_size': 64, 'epochs': 20}. Best is trial 83 with value: 0.982803565405664.
+                        #Trial 83 finished with value: 0.982803565405664 and parameters: 
+                        max_grad_norm= 5
+                        gae_lambda= 0.99
+                        lr= 0.0011172563477130418
+                        entropy_coef= 0.0034417738877241867
+                        entropy_decay= 0.07359940720031101
+                        procs= 4
+                        value_loss_coef= 0.5089918537606997
+                        actor_hidden_size= 32
+                        critic_hidden_size= 256
+                        feature_hidden_size= 32
+                        clip_eps= 0.13178468542859872
+                        batch_size= 64
+                        epochs= 20
                     else:
                         inwrap='none'
-                    input_type='flat'
-                    dissim_coef= 0
-                    # lr=0.0001
-                    # entropy_coef=0.002
-                    # entrpoy_decay=0.01
-                    # batch_size=256
-                    # epochs=4
-                    
-                    # With -0.1 every step
-                    # discount=0.99
-                    # max_grad_norm= 0.8
-                    # gae_lambda= 0.95
-                    # lr= 0.0010650071035089798
-                    # entropy_coef= 0.000678150163515309
-                    # entropy_decay= 9.347513374190233e-07
-                    # procs= 6
-                    # value_loss_coef= 0.14648442322655858
-                    # actor_hidden_size= 128
-                    # critic_hidden_size= 64
-                    # feature_hidden_size= 128
-                    # clip_eps= 0.17566918588142932
-                    # batch_size= 32
-                    # epochs= 5
-                    
-                    # with only final reward and fewer max steps
-                    max_grad_norm= 5
-                    gae_lambda= 0.95
-                    lr= 0.0030972523257061122
-                    entropy_coef= 2.136031953414213e-05
-                    entropy_decay= 0.012867127279332572
-                    procs=4
-                    value_loss_coef= 0.672960306771515
-                    actor_hidden_size= 64
-                    critic_hidden_size= 64
-                    feature_hidden_size= 64
-                    clip_eps= 0.20845387344130875
-                    batch_size= 64
-                    epochs= 5
+                        input_type='flat'
+                        dissim_coef= 0
+                        # lr=0.0001
+                        # entropy_coef=0.002
+                        # entrpoy_decay=0.01
+                        # batch_size=256
+                        # epochs=4
+                        
+                        # With -0.1 every step
+                        # discount=0.99
+                        # max_grad_norm= 0.8
+                        # gae_lambda= 0.95
+                        # lr= 0.0010650071035089798
+                        # entropy_coef= 0.000678150163515309
+                        # entropy_decay= 9.347513374190233e-07
+                        # procs= 6
+                        # value_loss_coef= 0.14648442322655858
+                        # actor_hidden_size= 128
+                        # critic_hidden_size= 64
+                        # feature_hidden_size= 128
+                        # clip_eps= 0.17566918588142932
+                        # batch_size= 32
+                        # epochs= 5
+                        
+                        # with only final reward and fewer max steps
+                        max_grad_norm= 5
+                        gae_lambda= 0.95
+                        lr= 0.0030972523257061122
+                        entropy_coef= 2.136031953414213e-05
+                        entropy_decay= 0.012867127279332572
+                        procs=4
+                        value_loss_coef= 0.672960306771515
+                        actor_hidden_size= 64
+                        critic_hidden_size= 64
+                        feature_hidden_size= 64
+                        clip_eps= 0.20845387344130875
+                        batch_size= 64
+                        epochs= 5
                     
                     ssp_dim=1
                     ssp_h=1

@@ -99,6 +99,8 @@ for j, env in enumerate(envs):
             feature_hidden_size= 256
             ssp_dim= 33
             ssp_h = np.array([ 1.2194623317407103, 0.12499819462090338,  0.019681173426129097])[:,None]
+        
+            ssp_h = np.array([ 1, 1,  0.01])[:,None]
         for seed in all_seeds:
             seed = int(seed)
             _model_name =  f"{env}_" + model_name + f"_{seed}" 

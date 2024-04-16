@@ -121,7 +121,54 @@ def draw_maze(maze, ax, c='k', lw=5, offset=False):
                 ax.plot([x1, x2], [y1, y2], color=c, linestyle='-', linewidth=lw)
                     
        
-                   
+
+def save_maze(maze, offset=True):
+
+    # Scaling factors mapping maze coordinates to image coordinates
+
+    all_cells = [[{'N': 1, 'E': 1, 'S': 1, 'W': 1} for _ in range(maze.MAZE_H) ] for _ in range(maze.MAZE_W)]
+    for x in range(maze.MAZE_W):
+        for y in range(maze.MAZE_H):
+            cell = maze.get_walls_status(maze.maze_cells[x,y])
+            if cell['N']:
+                all_cells[x][y]['N'] = 0
+                if y>0:
+                    all_cells[x][y-1]['S'] = 0
+            if cell['S']:
+                all_cells[x][y]['S'] = 0
+                if y<maze.MAZE_H-1:
+                    all_cells[x][y+1]['N'] = 0
+            if cell['E']:
+                all_cells[x][y]['E'] = 0
+                if x<maze.MAZE_W-1:
+                    all_cells[x+1][y]['W'] = 0
+            if cell['W']:
+                all_cells[x][y]['W'] = 0
+                if x>0:
+                    all_cells[x-1][y]['E'] = 0
+            
+    shift = 0
+    all_walls = []
+    for x in range(maze.MAZE_W):
+        for y in range(maze.MAZE_H):
+            walls = all_cells[x][y]
+            if walls['N']:
+                x1, y1, x2, y2 = x-shift, y -shift, x + 1-shift, y-shift
+                all_walls.append([[x1, x2], [y1, y2]])
+            if walls['S']:
+                x1, y1, x2, y2 = x-shift , y + 1-shift, x +1-shift, y + 1-shift  
+                all_walls.append([[x1, x2], [y1, y2]])
+            if walls['W']:
+                x1, y1, x2, y2 = x-shift, y-shift , x -shift, y + 1-shift
+                all_walls.append([[x1, x2], [y1, y2]])
+            if walls['E']:
+                x1, y1, x2, y2 = x+1-shift, y-shift, x+1-shift, y+1-shift
+                all_walls.append([[x1, x2], [y1, y2]])
+    dir = '/home/ns2dumon/Documents/Github/gym-continuous-maze/gym_continuous_maze/maze_samples/'
+    np.save(dir + f'maze2d_{maze.MAZE_W}x{maze.MAZE_H}.npy', np.array(all_walls), allow_pickle=False, fix_imports=True)
+                    
+       
+                                     
         # ax.plot(0, 0, 0, maze.MAZE_H, color=c, linewidth=lw)
         # ax.plot(0, 0, maze.MAZE_W, 0, color=c, linewidth=lw)
        
@@ -182,6 +229,17 @@ def plot_policy(maze,X,Y,probs,ax, wheel=True,offset=False,shading='gouraud',lw=
         ax_inset.spines['polar'].set_visible(True)
         ax_inset.spines['polar'].set_linewidth(lw)
 
+
+envs = np.array([ 'maze-sample-5x5-v0', 'maze-sample-6x6-v0', 'maze-sample-7x7-v0',
+        'maze-sample-8x8-v0', 'maze-sample-9x9-v0', 'maze-sample-10x10-v0',
+        'maze-sample-11x11-v0', 'maze-sample-12x12-v0','maze-sample-15x15-v0',
+        'maze-sample-20x20-v0' ])
+for env in envs:
+    gymenv = gym.make(env)
+    gymenv.reset()
+    maze = gymenv.maze_view.maze
+    save_maze(gymenv.maze_view.maze);
+    
 n_pts = None
 include_value = True
 plot_envs =  ['maze-sample-5x5-v0','maze-sample-8x8-v0','maze-sample-12x12-v0']

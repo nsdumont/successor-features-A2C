@@ -89,13 +89,12 @@ class SquashedNormal(pyd.transformed_distribution.TransformedDistribution):
         self.base_dist = pyd.Normal(loc, scale)
         transforms = [TanhTransform()]
         super().__init__(self.base_dist, transforms)
+        
+    def entropy(self):
+        return None
+    
+    
 
-    @property
-    def mean(self):
-        mu = self.loc
-        for tr in self.transforms:
-            mu = tr(mu)
-        return mu
     
 class TruncatedNormal(pyd.Normal):
     def __init__(self, loc, scale, low=-1.0, high=1.0, eps=1e-6) -> None:
