@@ -14,7 +14,7 @@ models = ['plot_8x8_ppo_image','plot_8x8_ppo_xy', 'plot_8x8_ppo_ssp-view']
 env_name = "MiniGrid-DoorKey-5x5-v0"
 
 n_seeds = 3
-replace_existing = True
+replace_existing = False
 
         
 for i,model_name in enumerate(models):

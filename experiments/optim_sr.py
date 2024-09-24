@@ -7,26 +7,26 @@ from hyperparam_opt import optim
 import utils
 import numpy as np
 
+
+## minigrid 6x6
 #image_cm
 #Trial 63 finished with value: 0.7247721403837204 and parameters: {'max_grad_norm': 1, 'gae_lambda': 0.95, 'lr': 1.551659964600454e-05, 'entropy_coef': 0.05003474519593319, 'entropy_decay': 3.124098155754289e-08, 'procs': 4, 'value_loss_coef': 0.34803454412571305, 'actor_hidden_size': 64, 'critic_hidden_size': 32, 'feature_hidden_size': 32}. Best is trial 63 with value: 0.7247721403837204.            
   #image_cm
-  # Trial 61 finished with value: 0.9458333253860474 and parameters: {'max_grad_norm': 5, 'gae_lambda': 0.98, 'lr': 0.00017870409681105425, 'entropy_coef': 2.977154951992409e-08, 'entropy_decay': 5.994156747822273e-08, 'procs': 1, 'value_loss_coef': 0.9222940207117354, 'actor_hidden_size': 128, 'critic_hidden_size': 64, 'feature_hidden_size': 256}. Best is trial 61 with value: 0.9458333253860474.
-
-          
-                    
+  # Trial 61 finished with value: 0.9458333253860474 and parameters: {'max_grad_norm': 5, 'gae_lambda': 0.98, 'lr': 0.00017870409681105425, 'entropy_coef': 2.977154951992409e-08, 'entropy_decay': 5.994156747822273e-08, 'procs': 1, 'value_loss_coef': 0.9222940207117354, 'actor_hidden_size': 128, 'critic_hidden_size': 64, 'feature_hidden_size': 256}. Best is trial 61 with value: 0.9458333253860474.            
 #ssp-xy_latent
 #Trial 4 finished with value: 0.9458333253860474 and parameters: {'max_grad_norm': 0.3, 'gae_lambda': 1.0, 'lr': 0.0017270083130236365, 'entropy_coef': 2.4679009323089367e-08, 'entropy_decay': 2.909523775296993e-05, 'procs': 1, 'value_loss_coef': 0.16112834586237457, 'actor_hidden_size': 32, 'critic_hidden_size': 64, 'feature_hidden_size': 32, 'ssp_dim': 129, 'ssp_h_0': 18.43163107671836, 'ssp_h_1': 17.0904786808492, 'ssp_h_2': 0.018008208823351766}. Best is trial 4 with value: 0.9458333253860474.
-
 
 #ssp-view_latent
 #Trial 8 finished with value: 0.9557291766007742 and parameters: {'max_grad_norm': 1, 'gae_lambda': 0.98, 'lr': 0.004817046936674357, 'entropy_coef': 1.1290096641176217e-07, 'entropy_decay': 3.0713000212417454e-06, 'procs': 6, 'value_loss_coef': 0.18182088220276893, 'actor_hidden_size': 256, 'critic_hidden_size': 32, 'feature_hidden_size': 256, 'ssp_dim': 33, 'ssp_h_0': 0.0036358926940071585, 'ssp_h_1': 0.1003837613424786, 'ssp_h_2': 0.18939089483802682}. Best is trial 8 with value: 0.9557291766007742.Trial 8 finished with value: 0.9557291766007742 
 
 
-env = "MiniGrid-Empty-6x6-v0"
-n_frames = 40000
+n_frames = 20000 #40000
 algos = ['sr']
-types = ['image_cm','image_icm','image_latent','image_aenc','image_lap',
-                  'ssp-xy_latent','ssp-view_latent','ssp-learn_latent']#, 'ssp']
+env = 'maze-sample-5x5-v0'
+n_frames = 20000
+types = ['ssp-learn_cm','none_cm','none_icm','none_latent','none_aenc','none_lap']
+# types = ['image_cm','image_icm','image_latent','image_aenc','image_lap',
+#                   'ssp-xy_latent','ssp-view_latent','ssp-learn_latent']#, 'ssp']
 n_seeds = 3
 n_trials=100
 params = {}
@@ -38,7 +38,7 @@ for algo in algos:
             inwrap='none'
             input_type='image'
         elif wrap=='ssp-learn':
-            inwrap='xy'
+            inwrap='none'
             input_type='ssp'
         else:
             inwrap=wrap
@@ -46,7 +46,7 @@ for algo in algos:
             
     
         study = optim(env,algo,inwrap,input_type,n_frames, n_seeds,n_trials, 
-                            domain_dim=3, feature_learn=feature_learn )
+                            domain_dim=2, feature_learn=feature_learn )
         params[algo + '-' + wrap] = study.best_params
         
 print(params)

@@ -39,6 +39,8 @@ from models.sr_model import SRModel
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env maze-random-7x7 --frames 30000 --wrapper ssp-auto --plot True --n_test_episodes 0 --ssp-h 1 --lr 0.001 --entropy-decay 1e-5 --gae-lambda 1 --optim-eps 1e-9 --entropy-coef 0.0002 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env ContinuousMaze-5x5-v0 --frames 30000 --input flat --wrapper none --plot True --n_test_episodes 0 --lr 0.001 --gae-lambda 1 ', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 
+# python train.py --algo a2c --env ContinuousMaze-5x5-v0 --frames 30000 --input flat --wrapper none --lr 0.001 --wandb --wandb-project-name ssp-rl --wandb-entity nicole-s-dumont --wandb-tags default-obs
+
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo ppo --env MiniWorld-Hallway-v0 --input image --frames 50000 --procs 16 --lr 0.00005 --optim-eps 1e-5 --gae-lambda 1 --entropy-coef 0.001 --value-loss-coef 0.5 --max-grad-norm 0.5 --epochs 4 --clip-eps 0.2', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 def run(args=None,custom_log_fun=None,**kwargs): 
     if args is None:
