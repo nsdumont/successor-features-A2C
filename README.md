@@ -3,7 +3,7 @@
 # Successor Features A2C
 A pytorch implementation of successor features in an advantage actor-critic model, that works for both discrete and continuous action spaces. This code is adapted from https://github.com/lcswillems/rl-starter-files and https://github.com/lcswillems/torch-ac.
 Included here is a novel learning rule for successor features, inspired by the off-line $\lambda$-return algorithm and generalized advantage estimation (GAE). 
-Additioanlly a method for learning the state/feature representation, that can be interpreted as an intrinsic reward encouraging exploration, is included as well.
+Additionally a method for learning the state/feature representation, that can be interpreted as an intrinsic reward encouraging exploration, is included as well.
 
 ## Requirements 
 See requirements file, or use the provided yml file to create a conda env:
