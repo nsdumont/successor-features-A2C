@@ -107,7 +107,7 @@ def run(args=None,custom_log_fun=None,**kwargs):
         for i in range(args.procs):
             envs.append(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args))
     elif args.wrapper =='ssp-auto':
-        from wrappers import SSPEnvWrapper
+        from hrr_gym_wrappers import SSPEnvWrapper
         for i in range(args.procs):
             envs.append( SSPEnvWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
                                 auto_convert_obs_space = True,auto_convert_action_space=False, shape_out = args.ssp_dim, length_scale=args.ssp_h,
@@ -124,7 +124,7 @@ def run(args=None,custom_log_fun=None,**kwargs):
                 envs.append( MiniGridOneHotWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), 
                                                    seed=args.seed, **args.wrapper_args))
         elif (args.wrapper =='ssp-xy'):
-            from wrappers import SSPMiniGridXYWrapper
+            from hrr_gym_wrappers import SSPMiniGridXYWrapper
             for i in range(args.procs): #***
                 # envs.append( SSPMiniActionWrapper(SSPMiniGridXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
                 #                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'), 
@@ -133,24 +133,34 @@ def run(args=None,custom_log_fun=None,**kwargs):
                                                   seed=args.seed, **args.wrapper_args,
                                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set') )
         elif(args.wrapper =='ssp-view'):
-            from wrappers import SSPMiniGridViewWrapper
+            from hrr_gym_wrappers import SSPMiniGridViewWrapper
             for i in range(args.procs):
                 envs.append( SSPMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
                                                     seed=args.seed+ 10000 * i, **args.wrapper_args,
                                      shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )    
         elif(args.wrapper =='ssp-lang'):
-             from wrappers import SSPBabyAIViewWrapper
+             from hrr_gym_wrappers import SSPBabyAIViewWrapper
              for i in range(args.procs):
                  envs.append( SSPBabyAIViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
                                                    seed=args.seed, shape_out = args.ssp_dim, 
                                                    length_scale=args.ssp_h, decoder_method = 'from-set', **args.wrapper_args,) )  
+        elif(args.wrapper =='ssp-view-prep'):
+             from hrr_gym_wrappers import PrepMiniGridViewWrapper
+             for i in range(args.procs):
+                 envs.append( PrepMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
+                                                   seed=args.seed, shape_out = args.ssp_dim, **args.wrapper_args,) )  
+        elif(args.wrapper =='ssp-view-prep2'):
+             from hrr_gym_wrappers import PrepMiniGridViewWrapper2
+             for i in range(args.procs):
+                 envs.append( PrepMiniGridViewWrapper2(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
+                                                   seed=args.seed, shape_out = args.ssp_dim, **args.wrapper_args,) ) 
         else:
             exec(f"from minigrid.wrappers import {args.wrapper} as wrapper")
             for i in range(args.procs):
                 envs.append(wrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args)))
     elif 'MiniWorld' in args.env: 
         if (args.wrapper =='ssp-xy'):
-            from wrappers import SSPMiniWorldXYWrapper
+            from hrr_gym_wrappers import SSPMiniWorldXYWrapper
             for i in range(args.procs):
                 envs.append( SSPMiniWorldXYWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args), seed=args.seed,
                                      shape_out = args.ssp_dim,  length_scale=args.ssp_h, decoder_method = 'from-set'))
@@ -541,7 +551,7 @@ if __name__ == "__main__":
     # SSP parameters: if input=ssp or wrapper is an SSP type
     parser.add_argument("--ssp-dim", type=int, default=151,
                         help="Dim of spp (default: 151)")
-    parser.add_argument("--ssp-h", type=float, default=None,
+    parser.add_argument("--ssp-h",  default=None,
                         help="Length scale of spp representation (default: None, it auto-selects")
 
 

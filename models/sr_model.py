@@ -7,7 +7,7 @@ import torch_ac
 import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Discrete, Box
-from .modules import mlp, ImageProcesser, FlatProcesser, SSPProcesser, IdentityProcesser
+from .modules import mlp, ImageProcesser, FlatProcesser, SSPProcesser, IdentityProcesser, SSPViewProcesser
 from .modules import ContinuousActor, DiscreteActor
 from .sr_modules import Identity, Laplacian, CM,CMv2
 from .sr_modules import ICM,ICMv2, TransitionModel, TransitionLatentModel, AutoEncoder, ImageAutoEncoder
@@ -18,7 +18,7 @@ from utils import weight_init
 
 
 feature_rep_options = {'image': ImageProcesser, 'flat': FlatProcesser, 
-                       'ssp': SSPProcesser, 'none': IdentityProcesser}
+                       'ssp': SSPProcesser, 'ssp-view': SSPViewProcesser, 'none': IdentityProcesser}
 
 # feature_learn_options = {'none-flat': Identity, 'image-image': Identity,
 #                          'lap-flat': Laplacian, 'lap-image': Laplacian,

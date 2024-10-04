@@ -37,7 +37,7 @@ recurrence: 1
 save_interval: 10
 seed: 1
 ssp_dim: 151
-ssp_h: null
+ssp_h: 1.0
 text: false
 value_loss_coef: 0.5
 verbose: true

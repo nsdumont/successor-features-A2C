@@ -164,7 +164,26 @@ def hslice(ax, x0, x1, y, **kwargs):
 def timeslice(ax, x0, x1, y, **kwargs):
     hslice(ax, x0, x1, y, **kwargs)
 
-# Modified from https://github.com/google-research/rliable/blob/master/rliable/plot_utils.py#L292
+
+
+def reorderLegend(ax=None,order=None,unique=False,**kwargs):
+    if ax is None: ax=plt.gca()
+    handles, labels = ax.get_legend_handles_labels()
+    labels, handles = zip(*sorted(zip(labels, handles), key=lambda t: t[0])) # sort both labels and handles by labels
+    if order is not None: # Sort according to a given list (not necessarily complete)
+        keys=dict(zip(order,range(len(order))))
+        labels, handles = zip(*sorted(zip(labels, handles), key=lambda t,keys=keys: keys.get(t[0],np.inf)))
+    if unique:  labels, handles= zip(*unique_everseen(zip(labels,handles), key = labels)) # Keep only the first of each handle
+    ax.legend(handles, labels,**kwargs)
+    return(handles, labels)
+
+
+def unique_everseen(seq, key=None):
+    seen = set()
+    seen_add = seen.add
+    return [x for x,k in zip(seq,key) if not (k in seen or seen_add(k))]
+
+
 import seaborn as sns
 from rliable.plot_utils import _annotate_and_decorate_axis
 def plot_sample_efficiency_curve(frames,
@@ -172,6 +191,8 @@ def plot_sample_efficiency_curve(frames,
                                  interval_estimates,
                                  algorithms=None,
                                  colors=None,
+                                 labels=None,
+                                 linestys=None,
                                  color_palette='colorblind',
                                  figsize=(7, 5),
                                  xlabel=r'Number of Frames (in millions)',
@@ -216,6 +237,14 @@ def plot_sample_efficiency_curve(frames,
     color_palette = sns.color_palette(color_palette, n_colors=len(algorithms))
     colors = dict(zip(algorithms, color_palette))
 
+
+
+  if labels is None:
+      labels = dict(zip(algorithms,algorithms))
+  if labels is None:
+      labels = dict(zip(algorithms, ['-'] * len(algorithms)))
+      
+
   for algorithm in algorithms:
     metric_values = point_estimates[algorithm]
     lower, upper = interval_estimates[algorithm]
@@ -225,9 +254,11 @@ def plot_sample_efficiency_curve(frames,
         color=colors[algorithm],
         marker=marker,
         linewidth=1,
-        label=algorithm)
+        label=labels[algorithm],
+        linestyle=linestys[algorithm])
+
     ax.fill_between(
-        frames, y1=lower, y2=upper, color=colors[algorithm], alpha=0.2)
+        frames, y1=lower, y2=upper, color=colors[algorithm], alpha=0.1)
   kwargs.pop('marker', '0')
   kwargs.pop('linewidth', '2')
 
@@ -238,3 +269,57 @@ def plot_sample_efficiency_curve(frames,
       labelsize=labelsize,
       ticklabelsize=ticklabelsize,
       **kwargs)
+
+
+def make_plots(model_names, env_name, linestys, cols, labels, n_seeds=1,ax=None,
+               legend=False,leg_order=None,ma_window=100,
+               **kwargs):
+    import pandas as pd
+    from rliable import library as rly
+    from rliable import metrics
+    from .storage import get_model_dir
+    if ax is None:
+        fig,ax =plt.subplots(1, 1, figsize=(7,2))
+    
+    res_dict = dict(zip(model_names, [[] for i in range(len(model_names))]))
+    # frames_dict = {}
+    for i,model_name in enumerate(model_names):
+        for seed in range(0,n_seeds):
+            try:
+                model_dir = get_model_dir(model_name +  '_' + str(seed))
+                data = pd.read_csv(model_dir + "/log.csv")
+            except:
+                print(f"Cannot find {model_dir}")
+                pass
+                data_returns = np.convolve(pd.to_numeric(data['return_mean']).values, np.ones(ma_window)/ma_window, mode='valid')
+                res_dict[model_name].append(data_returns)#.rolling(100).mean()
+            
+        res_dict[model_name] = np.array(res_dict[model_name])[:,None,:]
+        # frames_dict[model_name] = pd.to_numeric(data['frames']).astype(float).values
+    frames = pd.to_numeric(data['frames']).astype(float).values[:res_dict[model_name].shape[-1]]
+    iqm = lambda scores: np.array([metrics.aggregate_iqm(scores[..., frame])
+                               for frame in range(scores.shape[-1])])
+    iqm_scores, iqm_cis = rly.get_interval_estimates(
+          res_dict, iqm, reps=10000)
+    for i,model_name in enumerate(model_names):
+        lower, upper = iqm_cis[model_name]
+        ax.plot(
+            frames,
+            iqm_scores[model_name],
+            color=cols[model_name],
+            label=labels[model_name],
+            linestyle=linestys[model_name], **kwargs)
+        ax.fill_between(
+            frames, y1=lower, y2=upper, color=cols[model_name], alpha=0.2)
+        
+    ax.set_xlabel("Frames observed")
+    ax.set_ylabel("Average return")
+    
+    ax.set_title(env_name)
+    ax.ticklabel_format(style='scientific',scilimits=(-1,1))
+    if legend:
+        ax.legend(frameon=1,edgecolor='white')
+        if leg_order is not None:
+            reorderLegend(ax,leg_order,frameon=1,edgecolor='white')
+    return frames, iqm_scores, iqm_cis, res_dict
+

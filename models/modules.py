@@ -9,6 +9,7 @@ sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
 from spaces import HexagonalSSPSpace, RandomSSPSpace
 from distributions import SPDistribution
 from utils import weight_init, SquashedNormal
+import ast
 
 class _L2(nn.Module):
     def __init__(self, dim) -> None:
@@ -195,34 +196,54 @@ class FlatProcesser(nn.Module):
 ## Construct SSP features from input with trainable ls  
 class SSPProcesser(nn.Module):
     def __init__(self, obs_space,use_memory,  use_text, normalize, 
-                 input_embedding_size=151, hidden_size=0, activation_fun='relu', basis_type='learn', **kwargs):
+                 input_embedding_size=151, hidden_size=0, activation_fun='relu', basis_type='hex',rng=np.random.default_rng(0), **kwargs):
         super().__init__()
         if type(obs_space["image"]) is int:
             self.input_dim = obs_space["image"]
         else:
             self.input_dim = obs_space["image"][0]
+            
         if 'ssp_dim' in kwargs:
             input_embedding_size = kwargs['ssp_dim']
+        else:
+            input_embedding_size = input_embedding_size
+  
+          
         if 'ssp_h' in kwargs:
             initial_ls = kwargs['ssp_h']
-            if type(initial_ls) is np.ndarray:
-                initial_ls=torch.Tensor(initial_ls.flatten())
+            if (type(initial_ls) is np.ndarray):
+                initial_ls = torch.Tensor(initial_ls.flatten())
+            elif (type(initial_ls) is list):
+                initial_ls = torch.Tensor(initial_ls)
+            elif type(initial_ls) is str:
+                initial_ls = torch.Tensor(ast.literal_eval(initial_ls))
         else:
             initial_ls = 1.0
-        if basis_type=='hex':
-            ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size)
-            self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
-            self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
-        elif basis_type=='rand':
-            ssp_space = RandomSSPSpace(self.input_dim, input_embedding_size)
-            self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
-            self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
-        elif basis_type=='learn':
-            ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size) # initial
-            self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=True)
-            self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
+        
+       
+        # if basis_type=='hex':
+        #     ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size)
+        #     self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
+        #     self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
+        # elif basis_type=='rand':
+        #     ssp_space = RandomSSPSpace(self.input_dim, input_embedding_size)
+        #     self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=False)
+        #     self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
+        # elif basis_type=='learn':
+        #     ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size) # initial
+        #     self.phase_matrix = torch.nn.Parameter(torch.Tensor(ssp_space.phase_matrix),requires_grad=True)
+        #     self.length_scale = torch.nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
             # raise Exception("Learning the full phase matrix of the SSP encosing is not yet implemented") 
         
+        if basis_type=='hex':
+            ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size,rng=rng)
+        elif basis_type=='rand':
+            ssp_space = RandomSSPSpace(self.input_dim, input_embedding_size, rng=rng)
+            
+        self._features_dim = ssp_space.ssp_dim
+        self.nparams = (self._features_dim-1)//2
+        self.phase_matrix = nn.Parameter(torch.Tensor(ssp_space.phase_matrix[1:(self.nparams+1),:]),requires_grad=True)
+        self.length_scale = nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
         
         if hidden_size>0:
             self.layers =  mlp(ssp_space.ssp_dim, hidden_size, activation_fun, input_embedding_size)
@@ -236,14 +257,106 @@ class SSPProcesser(nn.Module):
                                  use_text=use_text, use_memory=use_memory, normalize=normalize)
         self.embedding_size = self.other.embedding_size
         
-    def forward(self, obs, memory):
-        x = obs.image
-        ls_mat = torch.atleast_2d(torch.diag(self.length_scale))
-        x = (self.phase_matrix @ (x @ ls_mat).T).type(torch.complex64) # fix .to(x.device)
+    def _encode(self, x):
+        ls_mat = torch.atleast_2d(torch.diag(1/self.length_scale)).to(x.device)
+        F = torch.zeros((self._features_dim, self.input_dim)).to(x.device)
+        F[1:(self.nparams+1),:] = self.phase_matrix
+        F[(self.nparams+1):,:] = -torch.flip(self.phase_matrix, dims=(0,))
+        x = (F @ (x @ ls_mat).T).type(torch.complex64) # fix .to(x.device)
         x = torch.fft.ifft( torch.exp( 1.j * x), axis=0 ).real.T
+        return x
+        
+    def forward(self, obs, memory):
+        x = self._encode(obs.image)
         x = self.layers(x)
         embedding, memory, embed_txt = self.other(obs, x, memory)
         return embedding, memory, embed_txt
+    
+class SSPViewProcesser(nn.Module): # only for minigrid
+    def __init__(self, obs_space,use_memory,  use_text, normalize, 
+                 input_embedding_size=151, hidden_size=0, activation_fun='relu', basis_type='hex', rng=np.random.default_rng(0), **kwargs):
+        super().__init__()
+        self.input_dim = 3
+            
+        if 'ssp_dim' in kwargs:
+            input_embedding_size = kwargs['ssp_dim']
+        else:
+            input_embedding_size = input_embedding_size
+  
+          
+        if 'ssp_h' in kwargs:
+            initial_ls = kwargs['ssp_h']
+            if (type(initial_ls) is np.ndarray):
+                initial_ls = torch.Tensor(initial_ls.flatten())
+            elif (type(initial_ls) is list):
+                initial_ls = torch.Tensor(initial_ls)
+            elif type(initial_ls) is str:
+                initial_ls = torch.Tensor(ast.literal_eval(initial_ls))
+        else:
+            initial_ls = 1.0
+        
+       
+        if basis_type=='hex':
+            ssp_space = HexagonalSSPSpace(self.input_dim, input_embedding_size,rng=rng)
+        elif basis_type=='rand':
+            ssp_space = RandomSSPSpace(self.input_dim, input_embedding_size, rng=rng)
+            
+        self._features_dim = ssp_space.ssp_dim
+        self.nparams = (self._features_dim-1)//2
+        self.phase_matrix = nn.Parameter(torch.Tensor(ssp_space.phase_matrix[1:(self.nparams+1),:]),requires_grad=True)
+        self.length_scale = nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
+        
+        self.view_width = 7
+        self.view_height = 7
+        domain_bounds = np.array([ [0, self.view_width-1],
+                                  [-(self.view_height-1)//2, (self.view_height-1)//2 ],
+                                  [0,3]])
+        xs = [np.arange(domain_bounds[i,1],domain_bounds[i,0]-1,-1) for i in range(2)]
+        xx = np.meshgrid(*xs)
+        xx[0] = 3 - xx[0]
+        xx[1] = 6 - xx[0]
+        self.grid_pts = torch.Tensor(np.array(xx))
+        self.n_pts = self.grid_pts.shape[1] * self.grid_pts.shape[2]
+        self.unroll_grid_pts  = torch.vstack([self.grid_pts[0,:].flatten(), self.grid_pts[1,:].flatten(), -torch.ones(self.n_pts)]).T
+        
+        if hidden_size>0:
+            self.layers =  mlp(ssp_space.ssp_dim, hidden_size, activation_fun, input_embedding_size)
+            self.input_embedding_size = input_embedding_size
+        else:
+            self.layers = torch.nn.Identity()
+            self.input_embedding_size = ssp_space.ssp_dim
+
+        
+        self.other = FeatureProcesser(obs_space, self.input_embedding_size, 
+                                 use_text=use_text, use_memory=use_memory, normalize=normalize)
+        self.embedding_size = self.other.embedding_size
+        
+   
+    def _encode(self, x):
+        ls_mat = torch.atleast_2d(torch.diag(1/self.length_scale)).to(x.device)
+        F = torch.zeros((self._features_dim, self.input_dim)).to(x.device)
+        F[1:(self.nparams+1),:] = self.phase_matrix
+        F[(self.nparams+1):,:] = -torch.flip(self.phase_matrix, dims=(0,))
+        x = (F @ (x @ ls_mat).T).type(torch.complex64) # fix .to(x.device)
+        x = torch.fft.ifft( torch.exp( 1.j * x), axis=0 ).real.T
+        return x
+    
+    def _bind(self,a,b):
+        return torch.fft.ifft(torch.fft.fft(a, axis=-1) * torch.fft.fft(b, axis=-1), axis=-1).real
+        
+    def forward(self, obs, memory):
+        x = obs.image[:,:self.input_dim]
+        M = self._encode(x)
+        
+        obj_sps = obs.image[:,self.input_dim:-self._features_dim].reshape(obs.image.shape[0],-1,self._features_dim)
+        ssp_grid_pts = self._encode(self.unroll_grid_pts.to(x.device)).reshape(1, self.n_pts, self._features_dim)
+        M += torch.sum(self._bind(obj_sps, ssp_grid_pts), axis=1)     
+        M += obs.image[:,-self._features_dim:]
+        
+        x = self.layers(M)
+        embedding, memory, embed_txt = self.other(obs, x, memory)
+        return embedding, memory, embed_txt
+     
     
 ## Features are the input, no transform
 class IdentityProcesser(nn.Module):
