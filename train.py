@@ -441,6 +441,11 @@ def run(args=None,custom_log_fun=None,**kwargs):
         wandbrun.finish()
     csv_file.close()
     tb_writer.close()
+    for e in envs:
+        e.close()
+    del envs
+    del model
+    
         
     return model_name, test_episode_returns
 

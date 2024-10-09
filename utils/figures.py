@@ -284,6 +284,7 @@ def make_plots(model_names, env_name, linestys, cols, labels, n_seeds=1,ax=None,
     res_dict = dict(zip(model_names, [[] for i in range(len(model_names))]))
     # frames_dict = {}
     for i,model_name in enumerate(model_names):
+        print(model_name)
         for seed in range(0,n_seeds):
             try:
                 model_dir = get_model_dir(model_name +  '_' + str(seed))
@@ -291,9 +292,10 @@ def make_plots(model_names, env_name, linestys, cols, labels, n_seeds=1,ax=None,
             except:
                 print(f"Cannot find {model_dir}")
                 pass
-                data_returns = np.convolve(pd.to_numeric(data['return_mean']).values, np.ones(ma_window)/ma_window, mode='valid')
-                res_dict[model_name].append(data_returns)#.rolling(100).mean()
-            
+            data_returns = np.convolve(pd.to_numeric(data['return_mean']).values, np.ones(ma_window)/ma_window, mode='valid')
+            if i==0:
+                nframes = len(data_returns)
+            res_dict[model_name].append(data_returns[:nframes])#.rolling(100).mean()
         res_dict[model_name] = np.array(res_dict[model_name])[:,None,:]
         # frames_dict[model_name] = pd.to_numeric(data['frames']).astype(float).values
     frames = pd.to_numeric(data['frames']).astype(float).values[:res_dict[model_name].shape[-1]]
