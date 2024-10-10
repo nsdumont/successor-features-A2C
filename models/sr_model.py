@@ -82,12 +82,12 @@ class SRModel(nn.Module, torch_ac.RecurrentACModel):
             if (feature_learn =='aenc') & (input_type=='image'):
                 self.feature_learner = ImageAutoEncoder(obs_space["image"],
                                      self.n_actions, self.embedding_size, feature_learn_hidden_size, self.feature_net)
-            # if (feature_learn=='icm') & ( type(action_space) == Discrete): # only one that depends on action type
-            #     self.feature_learner = ICMv2(obs_space["image"],
-            #                              self.n_actions, self.embedding_size, feature_learn_hidden_size, self.feature_net)
-            # elif (feature_learn=='cm') & ( type(action_space) == Discrete): # only one that depends on action type
-            #     self.feature_learner = CMv2(obs_space["image"],
-            #                              self.n_actions, self.embedding_size, feature_learn_hidden_size, self.feature_net)
+            if (feature_learn=='icm') & ( type(action_space) == Discrete): # only one that depends on action type
+                self.feature_learner = ICMv2(obs_space["image"],
+                                          self.n_actions, self.embedding_size, feature_learn_hidden_size, self.feature_net)
+            elif (feature_learn=='cm') & ( type(action_space) == Discrete): # only one that depends on action type
+                self.feature_learner = CMv2(obs_space["image"],
+                                          self.n_actions, self.embedding_size, feature_learn_hidden_size, self.feature_net)
             
             else:
                 self.feature_learner = feature_learn_options[feature_learn](obs_space["image"],
