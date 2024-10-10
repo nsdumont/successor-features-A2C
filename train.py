@@ -88,20 +88,24 @@ def run(args=None,custom_log_fun=None,**kwargs):
     utils.seed(args.seed)
     
     # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    txt_logger.info(f"Device: {device}\n")
-    
-    # Load environments 
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+
+    # Load environments
     envs = []
     if "MiniGrid" in args.env:
         import minigrid
-    elif "MiniWorl" in args.env:
+    elif "MiniWorld" in args.env:
         import miniworld
     elif "maze" in args.env:
         import gym_maze
     elif "ContinuousMaze" in args.env:
         import gym_continuous_maze
-
+    txt_logger.info(f"Device: {device}\n")
+    
         
     if args.wrapper=='none':
         for i in range(args.procs):
@@ -410,33 +414,12 @@ def run(args=None,custom_log_fun=None,**kwargs):
         plt.ylabel("Average Return", size=14)
         plt.title( f"{args.env}, {args.algo}")
     
-    if False: #args.n_test_episodes >0: # need to fix agent to use all new model init inputs
-        env=envs[0]
-        agent = utils.Agent(obs_space, env.action_space, model_dir, model_name =args.algo,
-                        device=device, argmax=True, num_envs=1, use_memory=args.mem, use_text=args.text,
-                        input_type = args.input, feature_learn = args.feature_learn, preprocess_obss=preprocess_obss)
-        test_episode_returns = np.zeros(args.n_test_episodes)
-        for episode in range(args.n_test_episodes):
-            obs,_ = env.reset()
-            n_steps = 0
-            while n_steps<500:
-                n_steps += 1
-                action = agent.get_action(obs)
-                obs, reward, t1,t2, _ = env.step(action)
-                test_episode_returns[episode] += reward
-                done = t1 or t2
-                agent.analyze_feedback(reward, done)
-        
-                if done:   
-                    break
-        txt_logger.info("Average test return: " + str(np.mean(test_episode_returns)) 
-                        + " (" + str(np.min(test_episode_returns)) + ", " + str(np.max(test_episode_returns)) + ")")
-    else:
-        try:# fix for case where model is loaded
-            test_episode_returns = data[4]
-        except:
-            test_episode_returns = None
-    
+
+    try:# fix for case where model is loaded
+        test_episode_returns = data[4]
+    except:
+        test_episode_returns = None
+
     if args.wandb:
         wandbrun.finish()
     csv_file.close()
@@ -595,58 +578,3 @@ if __name__ == "__main__":
     
     run(args)
 
-# plt.figure()
-# sns.lineplot(x="frames", y='entropy', data=data)
-# plt.title('Entropy')
-# plt.figure()
-# sns.lineplot(x="frames", y='policy_loss', data=data)
-# plt.title('Policy loss')
-# plt.figure()
-# sns.lineplot(x="frames", y='sr_loss', data=data)
-# plt.title('SR loss')
-# plt.figure()
-# sns.lineplot(x="frames", y='feature_loss', data=data)
-# plt.title('Feature loss')
-# plt.figure()
-# sns.lineplot(x="frames", y='reward_loss', data=data)
-# plt.title('Reward loss')
-# plt.figure()
-# sns.lineplot(x="frames", y='grad_norm', data=data)
-# plt.title('Grad norm')
-
-
-# model.reward.weight
-
-# r_preds = []
-# rs = []
-# obs,_=envs[0].reset()
-# plt.figure()
-# plt.imshow(envs[0].render())
-# for i in range(20):
-#     preprocessed_obs = algo.preprocess_obss([obs], device=algo.device)
-#     dist, value, embedding, _, successor, r_pred, _ = model(preprocessed_obs)
-#     action = dist.sample().detach()
-#     obs, reward, terminated, truncated, _ = envs[0].step(action.cpu().numpy())
-#     r_preds.append(r_pred)
-#     rs.append(reward)
-#     plt.figure()
-#     plt.imshow(envs[0].render())
-    
-    
-    
-# r_preds = []
-# rs = []
-# obs,_=envs[0].reset()
-# for i in range(1000):
-#     preprocessed_obs = algo.preprocess_obss([obs], device=algo.device)
-#     dist, value, embedding, _, successor, r_pred, _ = model(preprocessed_obs)
-#     action = dist.sample().detach()
-#     obs, reward, terminated, truncated, _ = envs[0].step(action.cpu().numpy())
-#     r_preds.append(r_pred.detach().cpu().numpy())
-#     rs.append(reward)
-#     if terminated or truncated:
-#         obs,_=envs[0].reset()
-    
-# idx = np.where([r>0 for r in rs])[0][0]
-# print(rs[idx-5:idx+5])
-# print(r_preds[idx-5:idx+5])
