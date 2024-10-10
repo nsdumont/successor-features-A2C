@@ -88,7 +88,7 @@ def run(args=None,custom_log_fun=None,**kwargs):
     utils.seed(args.seed)
     
     # Set device
-    device =torch.device( "cpu") #torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     txt_logger.info(f"Device: {device}\n")
     
     # Load environments 

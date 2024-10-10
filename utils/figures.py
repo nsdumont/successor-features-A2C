@@ -184,8 +184,7 @@ def unique_everseen(seq, key=None):
     return [x for x,k in zip(seq,key) if not (k in seen or seen_add(k))]
 
 
-import seaborn as sns
-from rliable.plot_utils import _annotate_and_decorate_axis
+
 def plot_sample_efficiency_curve(frames,
                                  point_estimates,
                                  interval_estimates,
@@ -229,6 +228,8 @@ def plot_sample_efficiency_curve(frames,
   Returns:
     `axes.Axes` object containing the plot.
   """
+  import seaborn as sns
+  from rliable.plot_utils import _annotate_and_decorate_axis
   if ax is None:
     _, ax = plt.subplots(figsize=figsize)
   if algorithms is None:
