@@ -27,7 +27,7 @@ from models.sr_model import SRModel
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper one-hot --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo a2c --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --input ssp --plot True', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 
-#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper ssp-xy --input none --plot True --feature-learn none', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
+#runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper ssp-xy --input none --plot False --feature-learn none', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper xy --input ssp --plot True --feature-learn icm', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 #runfile('/home/ns2dumon/Documents/Github/successor-features-A2C/train.py', args='--algo sr --env MiniGrid-Empty-6x6-v0 --frames 30000 --wrapper none --input image --plot True --feature-learn latent', wdir='/home/ns2dumon/Documents/Github/successor-features-A2C', post_mortem=True)
 
@@ -142,6 +142,13 @@ def run(args=None,custom_log_fun=None,**kwargs):
                 envs.append( SSPMiniGridViewWrapper(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
                                                     seed=args.seed+ 10000 * i, **args.wrapper_args,
                                      shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )    
+        elif(args.wrapper =='ssp-view2'):
+            from hrr_gym_wrappers import SSPMiniGridViewWrapper2
+            for i in range(args.procs):
+                envs.append( SSPMiniGridViewWrapper2(utils.make_env(args.env, args.seed + 10000 * i, **args.env_args),
+                                                    seed=args.seed+ 10000 * i, **args.wrapper_args,
+                                     shape_out = args.ssp_dim, length_scale=args.ssp_h, decoder_method = 'from-set') )    
+        
         elif(args.wrapper =='ssp-lang'):
              from hrr_gym_wrappers import SSPBabyAIViewWrapper
              for i in range(args.procs):
@@ -285,7 +292,7 @@ def run(args=None,custom_log_fun=None,**kwargs):
             ) from e
 
         run_name = f"{args.env}__{args.algo}__{args.seed}__{int(time.time())}"
-        tags = [*args.wandb_tags, "successor-features-A2C"]
+        tags = [*args.wandb_tags, "successor-features-A2C", args.env]
         wandbrun = wandb.init(
             name=run_name,
             project=args.wandb_project_name,
