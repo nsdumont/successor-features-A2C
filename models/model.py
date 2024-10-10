@@ -2,15 +2,15 @@ import torch.nn as nn
 import torch_ac
 import numpy as np
 from gymnasium.spaces import Discrete, Box
-from .modules import mlp, ImageProcesser, FlatProcesser, SSPProcesser, IdentityProcesser
+from .modules import mlp, ImageProcesser, FlatProcesser, SSPProcesser, SSPViewProcesser, IdentityProcesser
 from .modules import ContinuousActor, DiscreteActor
 import sys,os
 sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
 from spaces import SSPBox, SSPDiscrete
 from utils import weight_init
 
-feature_rep_options = {'image': ImageProcesser, 'flat': FlatProcesser, 
-                       'ssp': SSPProcesser, 'none': IdentityProcesser}
+feature_rep_options = {'image': ImageProcesser, 'flat': FlatProcesser, 'none': IdentityProcesser,
+                       'ssp': SSPProcesser, 'ssp-view': SSPViewProcesser}
 
 class ACModel(nn.Module, torch_ac.RecurrentACModel):
     def __init__(self, obs_space, action_space, use_memory=False,
