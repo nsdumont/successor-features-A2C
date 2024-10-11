@@ -7,7 +7,7 @@ import copy
 import numpy as np
 import yaml
 import json
-
+import ast
 
 from torch.utils.tensorboard import SummaryWriter
 import sys
@@ -439,6 +439,21 @@ def run(args=None,custom_log_fun=None,**kwargs):
         
     return model_name, test_episode_returns
 
+def float_or_list(value):
+    try:
+        # Try to directly convert it to a float
+        return float(value)
+    except ValueError:
+        # If it fails, assume it's a list and try to evaluate the string as a list
+        try:
+            parsed_value = ast.literal_eval(value)
+            if isinstance(parsed_value, list) and all(isinstance(i, (int, float)) for i in parsed_value):
+                return [float(i) for i in parsed_value]
+            else:
+                raise argparse.ArgumentTypeError(f"Invalid list: {value}")
+        except (ValueError, SyntaxError):
+            raise argparse.ArgumentTypeError(f"Invalid float or list: {value}")
+
 
 if __name__ == "__main__":
     # Parse arguments
@@ -546,7 +561,7 @@ if __name__ == "__main__":
     # SSP parameters: if input=ssp or wrapper is an SSP type
     parser.add_argument("--ssp-dim", type=int, default=151,
                         help="Dim of spp (default: 151)")
-    parser.add_argument("--ssp-h",  default=None,
+    parser.add_argument("--ssp-h",  type=float_or_list, default=None,
                         help="Length scale of spp representation (default: None, it auto-selects")
 
 
