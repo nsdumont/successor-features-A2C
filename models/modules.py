@@ -242,7 +242,7 @@ class SSPProcesser(nn.Module):
             
         self._features_dim = ssp_space.ssp_dim
         self.nparams = (self._features_dim-1)//2
-        self.phase_matrix = nn.Parameter(torch.Tensor(ssp_space.phase_matrix[1:(self.nparams+1),:]),requires_grad=True)
+        self.phase_matrix = nn.Parameter(torch.Tensor(ssp_space.phase_matrix[1:(self.nparams+1),:]),requires_grad=False)
         self.length_scale = nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
         
         if hidden_size>0:
@@ -303,7 +303,7 @@ class SSPViewProcesser(nn.Module): # only for minigrid
             
         self._features_dim = ssp_space.ssp_dim
         self.nparams = (self._features_dim-1)//2
-        self.phase_matrix = nn.Parameter(torch.Tensor(ssp_space.phase_matrix[1:(self.nparams+1),:]),requires_grad=True)
+        self.phase_matrix = nn.Parameter(torch.Tensor(ssp_space.phase_matrix[1:(self.nparams+1),:]),requires_grad=False)
         self.length_scale = nn.Parameter(initial_ls*torch.ones(self.input_dim), requires_grad=True)
         
         self.view_width = 7

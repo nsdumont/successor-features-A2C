@@ -87,8 +87,7 @@ class ICMv2(FeatureLearner):
         # predicted_next_obs = self.forward_dynamic_net(torch.cat([phi, action], dim=-1))
         # forward_error = (next_phi.detach() - predicted_next_obs).pow(2).mean()
         predicted_action = self.inverse_dynamic_net(torch.cat([phi, next_phi], dim=-1))  #or cross entropy?? same for cm2
-        predicted_action = F.log_softmax(predicted_action, dim=-1) 
-        backward_error =  F.nll_loss(predicted_action, action)
+        backward_error =  F.cross_entropy(predicted_action, action.float())
         icm_loss = backward_error
         # icm_loss = forward_error + backward_error
         return icm_loss
@@ -127,8 +126,7 @@ class CMv2(FeatureLearner):
         predicted_next_obs = self.forward_dynamic_net(torch.cat([phi, action], dim=-1))
         forward_error = (next_phi.detach() - predicted_next_obs).pow(2).mean()
         predicted_action = self.inverse_dynamic_net(torch.cat([phi, next_phi], dim=-1))
-        predicted_action = F.log_softmax(predicted_action, dim=-1) 
-        backward_error =  F.nll_loss(predicted_action, action)
+        backward_error = F.cross_entropy(predicted_action, action.float())
         icm_loss = backward_error
         icm_loss = forward_error + backward_error
         return icm_loss
