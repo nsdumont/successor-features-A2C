@@ -33,7 +33,7 @@ feature_learn_options = {'none': Identity, 'lap': Laplacian,
 
 class SRModel(nn.Module, torch_ac.RecurrentACModel):
     def __init__(self, obs_space, action_space, use_memory=False, use_text=False,normalize=True,
-                 input_type="image", feature_learn="curiosity",obs_space_sampler=None,
+                 input_type="image", feature_learn="cm", obs_space_sampler=None,
                  critic_hidden_size=64, actor_hidden_size=64, 
                  feature_hidden_size=256, feature_size=64, feature_learn_hidden_size=256, **kwargs):
         super().__init__()

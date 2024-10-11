@@ -29,21 +29,37 @@ class SRAlgo(BaseSRAlgo):
         #     self.optimizer = torch.optim.RMSprop(self.model.parameters(),
         #                                   lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps)
         # else:
+        # if self.feature_learn != "none":
+        #     self.feature_optimizer = torch.optim.RMSprop(list(self.model.feature_net.parameters()) +
+        #                                                   list(self.model.feature_learner.parameters()) ,#{'params': self.model.actor.parameters()} ],
+        #                                                   lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
+        #     self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+        #                                       lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
+        # else:
+        #     self.actor_optimizer = torch.optim.RMSprop(list(self.model.actor.parameters()) +
+        #                                                list(self.model.feature_net.parameters()),
+        #                                       lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
+        
+        # self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
+        #                                   lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps)
+        # self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
+        #                               lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps)
+        
         if self.feature_learn != "none":
             self.feature_optimizer = torch.optim.RMSprop(list(self.model.feature_net.parameters()) +
                                                           list(self.model.feature_learner.parameters()) ,#{'params': self.model.actor.parameters()} ],
                                                           lr_feature,alpha=rmsprop_alpha, eps=rmsprop_eps)
-            self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
-                                              lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
+            self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
+                                          lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps)
         else:
-            self.actor_optimizer = torch.optim.RMSprop(list(self.model.actor.parameters()) +
+            self.reward_optimizer = torch.optim.RMSprop(list(self.model.reward.parameters()) +
                                                        list(self.model.feature_net.parameters()),
-                                              lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
+                                          lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps)
         
+        self.actor_optimizer = torch.optim.RMSprop(self.model.actor.parameters(),
+                                          lr_actor,alpha=rmsprop_alpha, eps=rmsprop_eps)
         self.sr_optimizer = torch.optim.RMSprop(self.model.SR.parameters(),
                                           lr_sr,alpha=rmsprop_alpha, eps=rmsprop_eps)
-        self.reward_optimizer = torch.optim.RMSprop(self.model.reward.parameters(),
-                                      lr_reward,alpha=rmsprop_alpha, eps=rmsprop_eps)
         
         self.num_updates = 0
         
